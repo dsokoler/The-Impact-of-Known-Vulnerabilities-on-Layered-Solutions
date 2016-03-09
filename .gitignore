@@ -1,2 +1,2 @@
 #Get the XML files from the NVD website
-.xml
+*.xml
