@@ -47,9 +47,9 @@ namespace = {'entry': 'http://scap.nist.gov/schema/feed/vulnerability/2.0',
 
 
 #Names of each xml file to parse
-fileNames = ['nvdcve-2.0-2002.xml', 'nvdcve-2.0-2003.xml', 'nvdcve-2.0-2004.xml', 'nvdcve-2.0-2005.xml', 
-			 'nvdcve-2.0-2006.xml', 'nvdcve-2.0-2007.xml', 'nvdcve-2.0-2008.xml', 'nvdcve-2.0-2009.xml', 
-			 'nvdcve-2.0-2010.xml', 'nvdcve-2.0-2011.xml', 'nvdcve-2.0-2012.xml', 'nvdcve-2.0-2013.xml', 
+fileNames = [#'nvdcve-2.0-2002.xml', 'nvdcve-2.0-2003.xml', 'nvdcve-2.0-2004.xml', 'nvdcve-2.0-2005.xml', 
+			 #'nvdcve-2.0-2006.xml', 'nvdcve-2.0-2007.xml', 'nvdcve-2.0-2008.xml', 'nvdcve-2.0-2009.xml', 
+			 #'nvdcve-2.0-2010.xml', 'nvdcve-2.0-2011.xml', 'nvdcve-2.0-2012.xml', 'nvdcve-2.0-2013.xml', 
 			 'nvdcve-2.0-2014.xml', 'nvdcve-2.0-2015.xml', 'nvdcve-2.0-2016.xml']
 
 
@@ -432,13 +432,21 @@ def filterVulnerabilitiesBySummary(vulnerabilities, filter):
 #Create a plot using MatPlotLib
 def createTimeline(vulnerabilities):
 	datesVulnerable = [];
+	indices = [];
+	count = 1;
 	for vulnerability in vulnerabilities:
 		date = pd.to_datetime(vulnerability.datePublished)
 		datesVulnerable.append(date);
-
+		indices.append(count);
+		count += 1;
 
 	fig, ax = plt.subplots(figsize=(6,1));
-	ax.scatter(datesVulnerable, [1]*len(datesVulnerable), marker='s', s=100);
+
+	#Each vulnerability on the same Y level
+	#ax.scatter(datesVulnerable, [1]*len(datesVulnerable), marker='s', s=100);
+	
+	#Each vulnerability on it's own Y level
+	ax.scatter(datesVulnerable, indices, marker='s', s=100);
 	fig.autofmt_xdate();
 
 	#Plot formatting, so it looks like a timeline
@@ -461,6 +469,9 @@ def createTimeline(vulnerabilities):
 	
 	plt.show();
 
+	#Could just have each vulenrability have many points, each point representing a day
+	# that system was vulenrable (would have 10 points plotted on the same Y level if
+	# there were 10 days it was vulnerable for)
 
 
 #Main method	
