@@ -47,19 +47,19 @@ namespace = {'entry': 'http://scap.nist.gov/schema/feed/vulnerability/2.0',
 
 
 #Names of each xml file to parse
-fileNames = [#'nvdcve-2.0-2002.xml', 'nvdcve-2.0-2003.xml', 'nvdcve-2.0-2004.xml', 'nvdcve-2.0-2005.xml', 
-			 #'nvdcve-2.0-2006.xml', 'nvdcve-2.0-2007.xml', 'nvdcve-2.0-2008.xml', 'nvdcve-2.0-2009.xml', 
-			 #'nvdcve-2.0-2010.xml', 'nvdcve-2.0-2011.xml', 'nvdcve-2.0-2012.xml', 'nvdcve-2.0-2013.xml', 
+fileNames = ['nvdcve-2.0-2002.xml', 'nvdcve-2.0-2003.xml', 'nvdcve-2.0-2004.xml', 'nvdcve-2.0-2005.xml', 
+			 'nvdcve-2.0-2006.xml', 'nvdcve-2.0-2007.xml', 'nvdcve-2.0-2008.xml', 'nvdcve-2.0-2009.xml', 
+			 'nvdcve-2.0-2010.xml', 'nvdcve-2.0-2011.xml', 'nvdcve-2.0-2012.xml', 'nvdcve-2.0-2013.xml', 
 			 'nvdcve-2.0-2014.xml', 'nvdcve-2.0-2015.xml', 'nvdcve-2.0-2016.xml']
 
 
 
 #Include CVSS description and levels here
 helpText 	= """
-		0					1					2
---av	LOCAL				ADJACENT_NETWORK	NETWORK
+	0				1				2
+--av	LOCAL				ADJACENT_NETWORK	\tNETWORK
 --ac	HIGH 				MEDIUM				LOW
---auth	MULTIPLE_INSTANCES	SINGLE_INSTANCE		NONE
+--auth	MULTIPLE_INSTANCES	\tSINGLE_INSTANCE		\tNONE
 --conf	NONE				PARTIAL				COMPLETE
 --int	NONE				PARTIAL				COMPLETE
 --avail	NONE				PARTIAL				COMPLETE
@@ -72,8 +72,8 @@ helpText 	= """
 
 
 aboutText 	= """Produced as part of the INSuRE Project at Purdue University, Spring 2016 by Robert Haverkos and Daniel Sokoler
-				 Professors: Dr. Melissa Dark, Dr. John Springer
-				 Technical Directors: Trent Pitsenbarger, Bill Layton""";
+Professors: Dr. Melissa Dark, Dr. John Springer
+Technical Directors: Trent Pitsenbarger, Bill Layton""";
 
 
 
@@ -244,10 +244,11 @@ def getImpactMetrics(attribute):
 
 #Basic parsing of the xml file
 #@param 'filename': the name of the file to parse, in string format
-#returns a dictionary: {'cve': [cvssScore, datePublished]}
+#returns a list of vulnerability objects
 def parse(filename):
 	vulnerabilityList = []
 	
+	#Attempt to parse the given file, catch the error if that file is not found
 	try:
 		tree = etree.parse(filename);
 	except FileNotFoundError:
@@ -311,7 +312,7 @@ def getCVSS(entry):
 	if (cvss == None):
 		return None;
 
-	cvssScore 			= entry.find('.//vuln:cvss/cvss:base_metrics/cvss:score', namespace).text;
+	cvssScore 			= float(entry.find('.//vuln:cvss/cvss:base_metrics/cvss:score', namespace).text);
 	cvssAccess 			= entry.find('.//vuln:cvss/cvss:base_metrics/cvss:access-vector', namespace).text;
 	cvssComplexity 		= entry.find('.//vuln:cvss/cvss:base_metrics/cvss:access-complexity', namespace).text;
 	cvssAuthentication 	= entry.find('.//vuln:cvss/cvss:base_metrics/cvss:authentication', namespace).text;
@@ -394,7 +395,7 @@ def filterVulnerabilities(vulnerabilities, minScore, minAccess, minComplexity, m
 		#print("Comparing " + cvss.score + " to " + str(minScore));
 		if (cvss == None):
 			continue;
-		if (float(cvss.score) < minScore):
+		if (cvss.score < minScore):
 			continue;
 		if (cvss.vector < minAccess):
 			continue;
@@ -474,6 +475,18 @@ def createTimeline(vulnerabilities):
 	# there were 10 days it was vulnerable for)
 
 
+
+#Validate (some of) the options provided on the command line 
+def checkOptErr(opt, arg):
+	if (arg < 0 or arg > 2):
+		print();
+		print("Invalid --" + opt + " option: " + str(arg));
+		print("This option should be 0, 1, or 2");
+		print();
+		sys.exit(1);
+
+
+
 #Main method	
 #-h: 			print the help string, must be the first argument
 #--score=?		lowest score that makes a vulnerability relevant
@@ -486,9 +499,15 @@ def createTimeline(vulnerabilities):
 #--layers=?:	a comma separated list of the layers we are interested in looking at
 #--patchtime=?: the average time it takes from when a patch is released to when it is applied
 #Options that begin with "--" should have their argument be a number, either 0 1 or 2
-optionsList = [""];
+optionsList = "h";
 longOptionsList = ["score=", "av=", "ac=", "auth=", "conf=", "int=", "avail=", "layers=", "patchtime="]
 def main(argv):
+
+	print();
+	print(aboutText);
+	print();
+
+	#The default values for the "filter" variables
 	minScore 			= 0;
 	minAccess 			= 0;
 	minComplexity 		= 0;
@@ -505,35 +524,62 @@ def main(argv):
 		print(err);
 		sys.exit(2);
 
-	#Take the appropriate action with those arguments
+	#Take the appropriate action with those arguments and validate them
+	hasLayer = False;
 	for opt, arg in opts:
-		print("Option: " + opt);
+		print("Option: " + opt + "\t\tArgument: " + arg);
 		if(opt == "-h"):
 			print(helpText);
 			sys.exit(2);
 		elif (opt == "--score"):
 			minScore = float(arg);
+			if (minScore < 0 or minScore > 10):
+				print();
+				print("Invalid --score option: " + str(minScore));
+				print("This option should be between 0 and 10");
+				print();
+				sys.exit(1);
 		elif (opt == "--av"):
 			minAccess = int(arg);
+			checkOptErr(opt, minAccess);
 		elif (opt == "--ac"):
 			minComplexity = int(arg);
+			checkOptErr(opt, minComplexity);
 		elif (opt == "--auth"):
 			minAuthentication = int(arg);
+			checkOptErr(opt, minAuthentication);
 		elif (opt == "--conf"):
 			minConfidentiality = int(arg);
+			checkOptErr(opt, minConfidentiality);
 		elif (opt == "--int"):
 			minIntegrity = int(arg);
+			checkOptErr(opt, minIntegrity);
 		elif (opt == "--avail"):
 			minAvailability = int(arg);
+			checkOptErr(opt, minAvailability);
 		elif (opt == "--layers"):
 			layers = arg.replace(" ", ":");
 			layers = layers.lower();
 			layers = layers.split(',');
+			hasLayer = True;
 		elif (opt == "--patchtime"):
 			patchTime = arg;
+			if (patchTime < 0):
+				print();
+				print("Invalid --patchtime option: " + patchTime);
+				print("this option should be a positive number");
+				print();
+				sys.exit(1);
 
+	#Ensure we have a set of layers to analyze
+	if (hasLayer == False):
+		print("Please specify one or more layers to analyze.");
+		sys.exit();
+
+	#Holds all vulnerabilities
 	vulnerabilities = [];
 
+	#The bulk of this program, the actual gathering of data happens here, and in the parse method
 	print();
 	print("Analyzing NVD XML Files");
 	for name in tqdm(fileNames):
@@ -542,20 +588,21 @@ def main(argv):
 
 	print("Total Vulnerabilities: " + str(totalVulnerabilities));
 
-	#vulnerabilities, minScore, minAccess, minComplexity, minAuthentication
-	#minConfidentiality, minIntegrity, minAvailability
+	#Keeps track of each set of vulnerabilities: key is the layer, value is a list of that layer's vulnerabilities
+	layerVulnerabilities = {};
 
-	juniperCount = findProducts("juniper", vulnerabilities);
-	ciscoCount = findProducts("cisco", vulnerabilities);
+	#Get the vulnerabilities for each layer, filter them by the specified criteria, and visualize them
+	for layer in layers:
+		layerList = findProducts(layer, vulnerabilities);
+		layerListFiltered = filterVulnerabilities(layerList, minScore, minAccess, minComplexity, minAuthentication, minConfidentiality, minIntegrity, minAvailability);
+		layerVulnerabilities[layer] = layerList;
+		if (layerListFiltered == []):
+			print("No vulnerabilities for " + layer + ".");
+			print();
+		else:
+			createTimeline(layerListFiltered);
 
-	juniperCountFiltered = filterVulnerabilities(juniperCount, minScore, minAccess, minComplexity, minAuthentication, minConfidentiality, minIntegrity, minAvailability);
 
-	#cve, products, datePublished, datePatched, cvss, cwe, references, summary
-	#CVSS: score, vector, complexity, authentication, confidentiality, integrity, availability
-	#for vuln in juniperCountFiltered:
-	#	vuln.printVuln();
-
-	createTimeline(juniperCountFiltered);
 
 #Ensures this only runs if parse.py is the main file called
 if __name__ == "__main__":
