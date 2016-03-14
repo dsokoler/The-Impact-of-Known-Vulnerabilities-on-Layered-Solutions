@@ -70,7 +70,7 @@ helpText 	= """
 """;
 
 
-
+#Specifies information about the creation of this project
 aboutText 	= """Produced as part of the INSuRE Project at Purdue University, Spring 2016 by Robert Haverkos and Daniel Sokoler
 Professors: Dr. Melissa Dark, Dr. John Springer
 Technical Directors: Trent Pitsenbarger, Bill Layton""";
@@ -274,7 +274,6 @@ def parse(filename):
 
 		#The CVE of this vulnerability
 		cveID = entry.attrib['id'];
-		#print(cveID);
 
 		#The list of vulnerable products this vulnerability affects
 		productList = getProducts(entry);
@@ -289,6 +288,7 @@ def parse(filename):
 			datePublishedText 	= datePublished.text;
 			datePublished 		= datePublishedText.split('T', 1)[0];
 
+		#Generate a random patch date for this vulnerability (will be changed when wehave actual patch dates)
 		datePatched = generateRandomPatchTime(7, 2, 150);
 
 		#Holds all the information regarding this vulnerability's CVSS score
@@ -300,6 +300,7 @@ def parse(filename):
 		#A list of all URL references for this vulnerability
 		referenceList = getReferences(entry);
 
+		#Create the vulnerability object
 		vulnerability = Vulnerability(cveID, productList, datePublished, datePatched,
 									  cvssObject, cweID, referenceList, cveSummary);
 
@@ -321,6 +322,7 @@ def getCVSS(entry):
 	if (cvss == None):
 		return None;
 
+	#Gather all CVSS info
 	cvssScore 			= float(entry.find('.//vuln:cvss/cvss:base_metrics/cvss:score', namespace).text);
 	cvssAccess 			= entry.find('.//vuln:cvss/cvss:base_metrics/cvss:access-vector', namespace).text;
 	cvssComplexity 		= entry.find('.//vuln:cvss/cvss:base_metrics/cvss:access-complexity', namespace).text;
@@ -387,8 +389,9 @@ def findProducts(vulnerabilities, name):
 	count = 0;
 	vulnerableEntries = [];
 	for vulnerability in tqdm(vulnerabilities):
-		if (vulnerability.products == None):
+		if (vulnerability.products == None or vulnerability.products == []):
 			continue;
+
 		for product in vulnerability.products:
 			if (name in product):
 				count += 1;
@@ -410,7 +413,8 @@ def filterVulnerabilities(vulnerabilities, name, minScore, minAccess, minComplex
 	#score, vector, complexity, authentication, confidentiality, integrity, availability
 	for vulnerability in vulnerabilities:
 		cvss = vulnerability.cvss;
-		#print("Comparing " + cvss.score + " to " + str(minScore));
+		
+		#Giant mash of tests for the vulnerability to pass (or not)
 		if (cvss == None):
 			continue;
 		if (cvss.score < minScore):
@@ -459,28 +463,34 @@ def filterVulnerabilitiesBySummary(vulnerabilities, filter):
 #@param layers: a list of the names of each layer to be plotted
 #returns nothing, simply prints the plot
 def createTimeline(vulnerabilities, layers):
+
+	#Initialization of subplots, 1 per layer
 	fig, ax = plt.subplots(len(layers), sharex=True);
 	
+	#Default start and end dates for the x axis
 	startDate = pd.to_datetime("December 31, 2016");
 	endDate = pd.to_datetime("January 1, 1999");
 
+	#Create a subplot for each layer
 	subplot = 0;
 	for layer in layers:
 		layerVulnerabilities = vulnerabilities[layer];
 
+		#Pull the release and patch dates for this vulnerability and plot them
 		count = 1;
 		for vulnerability in layerVulnerabilities:
 			date = pd.to_datetime(vulnerability.datePublished);
 			date2 = date + pd.Timedelta(vulnerability.datePatched, unit='d')
 			ax[subplot].hlines(count, date, date2);
-			#print("DATE    " + str(date) + ":" + str(startDate) + ": " + str(date < startDate));
-			#print("DATE2   " + str(date2) + ":" + str(endDate) + ": " + str(date2 > endDate));
+
+			#Set our new start/end for the x axis if neccessary
 			if (date < startDate):
 				startDate = date;
 			if (date2 > endDate):
 				endDate = date2;
 			count += 1;
 
+		#Format this subplot to look correct
 		ax[subplot].spines['right'].set_visible(False)
 		ax[subplot].spines['left'].set_visible(False)
 		ax[subplot].spines['top'].set_visible(False)
@@ -492,15 +502,12 @@ def createTimeline(vulnerabilities, layers):
 	
 	fig.autofmt_xdate();
 
+
+	#Set the range of the x axis so everything looks nice
 	day = pd.Timedelta("100 days");
-
-	#This is if we want the start end end to 
-	#startDate = pd.to_datetime(vulnerabilities[0].datePublished);
-	#endDate   = pd.to_datetime(vulnerabilities[-1].datePublished) + pd.Timedelta(vulnerabilities[-1].datePatched, unit='d');
-
 	plt.xlim(startDate - day, endDate + day)
 
-	
+	#Label things (title and x axis)
 	fig.suptitle("Vulnerabilities in Layered Solutions", fontsize=18);
 	plt.xlabel('Dates Vulnerable');
 	plt.show();
