@@ -1,6 +1,6 @@
 #TQDM is the progress bar
 from tqdm import tqdm
-import sys, getopt
+import sys, getopt, random
 
 #Numpy is a dependency of MatPlotLib
 try:
@@ -218,6 +218,8 @@ class CVSS:
 
 
 #Convert the string values of exploitability ratings to their numerical value
+#@param attribute: a string representing an attribute of a vulnerability
+#returns the attribute in integer form, -1 if invalid
 def getExploitabilityRating(attribute):
 	if (attribute == "LOCAL" or attribute == "HIGH" or attribute == "MULTIPLE_INSTANCES"):
 		return 0;
@@ -227,8 +229,11 @@ def getExploitabilityRating(attribute):
 		return 2;
 	else:
 		print("INCORRECT EXPLOITABILITY RATING: " + attribute)
+		return -1;
 
 #Convert the string value of impact metrics to their numerical value
+#@param attribute: a string representing an attribute of a vulnerability
+#returns the attribute in integer form, -1 if invalid
 def getImpactMetrics(attribute):
 	if (attribute == "NONE"):
 		return 0;
@@ -284,6 +289,8 @@ def parse(filename):
 			datePublishedText 	= datePublished.text;
 			datePublished 		= datePublishedText.split('T', 1)[0];
 
+		datePatched = generateRandomPatchTime(7, 2, 150);
+
 		#Holds all the information regarding this vulnerability's CVSS score
 		cvssObject = getCVSS(entry);
 
@@ -293,7 +300,7 @@ def parse(filename):
 		#A list of all URL references for this vulnerability
 		referenceList = getReferences(entry);
 
-		vulnerability = Vulnerability(cveID, productList, datePublished, None,
+		vulnerability = Vulnerability(cveID, productList, datePublished, datePatched,
 									  cvssObject, cweID, referenceList, cveSummary);
 
 		#Store this vulnerability
@@ -307,6 +314,8 @@ def parse(filename):
 
 
 #Gathers the information on the cvss ratings of this vulnerability
+#@param entry: the XML object to parse
+#returns a CVSS object containing that this entry's vulnerability's CVSS information
 def getCVSS(entry):
 	cvss = entry.find('.//vuln:cvss', namespace);
 	if (cvss == None):
@@ -328,6 +337,8 @@ def getCVSS(entry):
 
 
 #Returns the list of URLs for the references (hopefully these are patch notes)
+#@param entry: the XML object to parse
+#returns a list of strings that are the references for this entry's vulnerability
 def getReferences(entry):
 	referenceList = [];
 	for reference in entry.findall('.//vuln:references/vuln:reference', namespace):
@@ -339,6 +350,8 @@ def getReferences(entry):
 
 
 #Locate the CWE ID for this entry
+#@param entry: the XML object to parse
+#returns a string that is the CWE identifier for this entry's vulnerability
 def getCWE(entry):
 	cweEntry = entry.find('.//vuln:cwe', namespace);
 	if (cweEntry == None):
@@ -349,6 +362,8 @@ def getCWE(entry):
 
 
 #Returns the list of products this vulnerability affects
+#@param entry: the XML object to parse
+#returns a list of strings that are the products for this entry's vulnerability
 def getProducts(entry):
 	products = [];
 	productList = entry.find('.//vuln:vulnerable-software-list', namespace);
@@ -365,11 +380,12 @@ def getProducts(entry):
 
 
 #Finds all vulnerabilities with 'name' in the products list
-def findProducts(name, vulnerabilities):
+#@param vulnerabilities: the list of vulnerabilities to be searched for (by name)
+#@param name: the name to search each vulnerablity for
+#returns a list of vulnerability objects that all have 'name' in their product list
+def findProducts(vulnerabilities, name):
 	count = 0;
 	vulnerableEntries = [];
-	print();
-	print("Finding all relevant vulnerabilities for \"" + name + "\": ", end="");
 	for vulnerability in tqdm(vulnerabilities):
 		if (vulnerability.products == None):
 			continue;
@@ -379,16 +395,18 @@ def findProducts(name, vulnerabilities):
 				vulnerableEntries.append(vulnerability);
 				break;
 
-	print(str(count));
-
 	return vulnerableEntries;
 
 
 
 #Returns a list of vulnerabilities that match the criteria specified in this function's arguments
-def filterVulnerabilities(vulnerabilities, minScore, minAccess, minComplexity, minAuthentication, minConfidentiality, minIntegrity, minAvailability):
+def filterVulnerabilities(vulnerabilities, name, minScore, minAccess, minComplexity, minAuthentication, minConfidentiality, minIntegrity, minAvailability):
 	validVulnerabilities = [];
+	count = 0;
 
+	print();
+	print("Finding all relevant vulnerabilities for \"" + name + "\": ", end="");
+	
 	#score, vector, complexity, authentication, confidentiality, integrity, availability
 	for vulnerability in vulnerabilities:
 		cvss = vulnerability.cvss;
@@ -411,12 +429,18 @@ def filterVulnerabilities(vulnerabilities, minScore, minAccess, minComplexity, m
 			continue;
 
 		validVulnerabilities.append(vulnerability);
+		count += 1;
+
+	print(str(count));
 
 	return validVulnerabilities;
 
 
 
 #Search a vulnerability's summary for a string
+#@param vulnerabilities: a list of vulnerabilities to search
+#@param filter: the filter to apply to each vulnerability's summary
+#returns a list of vulnerability objects who's summary contains 'filter'
 def filterVulnerabilitiesBySummary(vulnerabilities, filter):
 	filteredVulnerabilities = [];
 
@@ -431,52 +455,62 @@ def filterVulnerabilitiesBySummary(vulnerabilities, filter):
 
 
 #Create a plot using MatPlotLib
-def createTimeline(vulnerabilities):
-	datesVulnerable = [];
-	indices = [];
-	count = 1;
-	for vulnerability in vulnerabilities:
-		date = pd.to_datetime(vulnerability.datePublished)
-		datesVulnerable.append(date);
-		indices.append(count);
-		count += 1;
-
-	fig, ax = plt.subplots(figsize=(6,1));
-
-	#Each vulnerability on the same Y level
-	#ax.scatter(datesVulnerable, [1]*len(datesVulnerable), marker='s', s=100);
+#@param vulnerabilities: a dictionary, each key is the layer name, each value is the list of vulnearbilities
+#@param layers: a list of the names of each layer to be plotted
+#returns nothing, simply prints the plot
+def createTimeline(vulnerabilities, layers):
+	fig, ax = plt.subplots(len(layers), sharex=True);
 	
-	#Each vulnerability on it's own Y level
-	ax.scatter(datesVulnerable, indices, marker='s', s=100);
+	startDate = pd.to_datetime("December 31, 2016");
+	endDate = pd.to_datetime("January 1, 1999");
+
+	subplot = 0;
+	for layer in layers:
+		layerVulnerabilities = vulnerabilities[layer];
+
+		count = 1;
+		for vulnerability in layerVulnerabilities:
+			date = pd.to_datetime(vulnerability.datePublished);
+			date2 = date + pd.Timedelta(vulnerability.datePatched, unit='d')
+			ax[subplot].hlines(count, date, date2);
+			#print("DATE    " + str(date) + ":" + str(startDate) + ": " + str(date < startDate));
+			#print("DATE2   " + str(date2) + ":" + str(endDate) + ": " + str(date2 > endDate));
+			if (date < startDate):
+				startDate = date;
+			if (date2 > endDate):
+				endDate = date2;
+			count += 1;
+
+		ax[subplot].spines['right'].set_visible(False)
+		ax[subplot].spines['left'].set_visible(False)
+		ax[subplot].spines['top'].set_visible(False)
+		ax[subplot].xaxis.set_ticks_position('bottom')
+		ax[subplot].get_yaxis().set_ticklabels([])
+		ax[subplot].set_ylabel(layer.replace(':', ' ').title());
+
+		subplot += 1;
+	
 	fig.autofmt_xdate();
 
-	#Plot formatting, so it looks like a timeline
-	ax.yaxis.set_visible(False)
-	ax.spines['right'].set_visible(False)
-	ax.spines['left'].set_visible(False)
-	ax.spines['top'].set_visible(False)
-	ax.xaxis.set_ticks_position('bottom')
+	day = pd.Timedelta("100 days");
 
-	ax.get_yaxis().set_ticklabels([])
-	day = pd.to_timedelta("1", unit='D')
-	
 	#This is if we want the start end end to 
-	#plt.xlim(datesVulnerable[0] - day, datesVulnerable[-1] + day)
+	#startDate = pd.to_datetime(vulnerabilities[0].datePublished);
+	#endDate   = pd.to_datetime(vulnerabilities[-1].datePublished) + pd.Timedelta(vulnerabilities[-1].datePatched, unit='d');
+
+	plt.xlim(startDate - day, endDate + day)
+
 	
-	#This is is we want it to go from startDate to endDate
-	startDate = pd.to_datetime("January 1, 1999");
-	endDate   = pd.to_datetime("December 31, 2016");
-	plt.xlim(startDate, endDate);
-	
+	fig.suptitle("Vulnerabilities in Layered Solutions", fontsize=18);
+	plt.xlabel('Dates Vulnerable');
 	plt.show();
 
-	#Could just have each vulenrability have many points, each point representing a day
-	# that system was vulenrable (would have 10 points plotted on the same Y level if
-	# there were 10 days it was vulnerable for)
 
 
-
-#Validate (some of) the options provided on the command line 
+#Validate (some of) the options provided on the command line
+#@param opt: the option specified on the command line ("--score" or "--auth", etc)
+#@param arg: the argument specified with its corresponding option (valid is between 0 and 2)
+#returns nothing, exits if error
 def checkOptErr(opt, arg):
 	if (arg < 0 or arg > 2):
 		print();
@@ -484,6 +518,18 @@ def checkOptErr(opt, arg):
 		print("This option should be 0, 1, or 2");
 		print();
 		sys.exit(1);
+
+
+
+#Generate a random number of days for which this patch was released and applied
+#@param patchTime: the time from the release of the patch to when it was applied (default is 7 days)
+#@param start: the beginning of the window in which to generate the random
+#@param end: the end of the window in which to generate the random
+#returns a random integer between start and end offset by patchTime
+def generateRandomPatchTime(patchTime, start, end):
+	random.seed();
+	return (random.randint(start, end) + patchTime);
+
 
 
 
@@ -574,7 +620,7 @@ def main(argv):
 	#Ensure we have a set of layers to analyze
 	if (hasLayer == False):
 		print("Please specify one or more layers to analyze.");
-		sys.exit();
+		sys.exit(1);
 
 	#Holds all vulnerabilities
 	vulnerabilities = [];
@@ -593,15 +639,14 @@ def main(argv):
 
 	#Get the vulnerabilities for each layer, filter them by the specified criteria, and visualize them
 	for layer in layers:
-		layerList = findProducts(layer, vulnerabilities);
-		layerListFiltered = filterVulnerabilities(layerList, minScore, minAccess, minComplexity, minAuthentication, minConfidentiality, minIntegrity, minAvailability);
-		layerVulnerabilities[layer] = layerList;
+		layerList = findProducts(vulnerabilities, layer);
+		layerListFiltered = filterVulnerabilities(layerList, layer, minScore, minAccess, minComplexity, minAuthentication, minConfidentiality, minIntegrity, minAvailability);
+		layerVulnerabilities[layer] = layerListFiltered;
 		if (layerListFiltered == []):
 			print("No vulnerabilities for " + layer + ".");
 			print();
-		else:
-			createTimeline(layerListFiltered);
 
+	createTimeline(layerVulnerabilities, layers);
 
 
 #Ensures this only runs if parse.py is the main file called
