@@ -1,7 +1,5 @@
 #Suggestions
-#-3rd visual that is just 'x' number of lines, a gap in the line indicates a vulnerability in that layer
-# -for each layer need to compile all gaps, including if two vulnerabilities overlap (their gap should be combined)
-#-Serialize the list of relevant vulnerabilities and store on disk.
+#-Data persistence.
 # -separate this script into two:
 #  -1: data parser, reads in the raw data from the xml and creates the object lists
 #  -2: visualizer, visualizes those object lists (that may be stored on)
@@ -14,7 +12,6 @@
 #TQDM is the progress bar
 from tqdm import tqdm
 import sys, getopt, random
-import functools as ft
 
 #Numpy is a dependency of MatPlotLib
 try:
@@ -85,7 +82,7 @@ helpText 	= """
 
 
 #Specifies information about the creation of this project
-aboutText 	= """Produced as part of the INSuRE Project at Purdue University, Spring 2016 by Robert Haverkos and Daniel Sokoler
+aboutText 	= """Produced as part of the INSuRE Project at Purdue University, Spring 2016 by Daniel Sokoler and Robert Haverkos
 Professors: Dr. Melissa Dark, Dr. John Springer, Dr. Filipo Sharevski
 Technical Directors: Trent Pitsenbarger, Bill Layton""";
 
@@ -490,7 +487,7 @@ def createTimeline(vulnerabilities, layers):
 	for layer in layers:
 		layerVulnerabilities = vulnerabilities[layer];
 
-		ax[-1].hlines(len(layers) - (subplot), pd.to_datetime("January 1, 1999"), pd.to_datetime("December 31, 2016"));
+		ax[-1].hlines(len(layers) - (subplot), pd.to_datetime("January 1, 1999"), pd.to_datetime("December 31, 2016"), linewidth=3);
 
 		#Format this subplot to look correct
 		ax[subplot].spines['right'].set_visible(False)
@@ -513,7 +510,7 @@ def createTimeline(vulnerabilities, layers):
 			date2 = date + pd.Timedelta(vulnerability.datePatched, unit='d')
 			
 			ax[subplot].hlines(count, date, date2);
-			ax[-1].hlines(len(layers) - (subplot), date, date2, color='r');
+			ax[-1].hlines(len(layers) - (subplot), date, date2, color='r', linewidth=3);
 
 			#Set our new start/end for the x axis if neccessary
 			if (date < startDate):
