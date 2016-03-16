@@ -1,6 +1,20 @@
+#Suggestions
+#-3rd visual that is just 'x' number of lines, a gap in the line indicates a vulnerability in that layer
+# -for each layer need to compile all gaps, including if two vulnerabilities overlap (their gap should be combined)
+#-Serialize the list of relevant vulnerabilities and store on disk.
+# -separate this script into two:
+#  -1: data parser, reads in the raw data from the xml and creates the object lists
+#  -2: visualizer, visualizes those object lists (that may be stored on)
+#
+#Issues
+#-When 1 plot has no data and another has data the x axis values get all screwed up
+#
+
+
 #TQDM is the progress bar
 from tqdm import tqdm
 import sys, getopt, random
+import functools as ft
 
 #Numpy is a dependency of MatPlotLib
 try:
@@ -47,9 +61,9 @@ namespace = {'entry': 'http://scap.nist.gov/schema/feed/vulnerability/2.0',
 
 
 #Names of each xml file to parse
-fileNames = ['nvdcve-2.0-2002.xml', 'nvdcve-2.0-2003.xml', 'nvdcve-2.0-2004.xml', 'nvdcve-2.0-2005.xml', 
-			 'nvdcve-2.0-2006.xml', 'nvdcve-2.0-2007.xml', 'nvdcve-2.0-2008.xml', 'nvdcve-2.0-2009.xml', 
-			 'nvdcve-2.0-2010.xml', 'nvdcve-2.0-2011.xml', 'nvdcve-2.0-2012.xml', 'nvdcve-2.0-2013.xml', 
+fileNames = [#'nvdcve-2.0-2002.xml', 'nvdcve-2.0-2003.xml', 'nvdcve-2.0-2004.xml', 'nvdcve-2.0-2005.xml', 
+			 #'nvdcve-2.0-2006.xml', 'nvdcve-2.0-2007.xml', 'nvdcve-2.0-2008.xml', 'nvdcve-2.0-2009.xml', 
+			 #'nvdcve-2.0-2010.xml', 'nvdcve-2.0-2011.xml', 'nvdcve-2.0-2012.xml', 'nvdcve-2.0-2013.xml', 
 			 'nvdcve-2.0-2014.xml', 'nvdcve-2.0-2015.xml', 'nvdcve-2.0-2016.xml']
 
 
@@ -465,7 +479,7 @@ def filterVulnerabilitiesBySummary(vulnerabilities, filter):
 def createTimeline(vulnerabilities, layers):
 
 	#Initialization of subplots, 1 per layer
-	fig, ax = plt.subplots(len(layers), sharex=True);
+	fig, ax = plt.subplots(len(layers) + 1, sharex=True);
 	
 	#Default start and end dates for the x axis
 	startDate = pd.to_datetime("December 31, 2016");
@@ -476,12 +490,42 @@ def createTimeline(vulnerabilities, layers):
 	for layer in layers:
 		layerVulnerabilities = vulnerabilities[layer];
 
+		ax[-1].hlines(len(layers) - (subplot), pd.to_datetime("January 1, 1999"), pd.to_datetime("December 31, 2016"));
+
+		#Format this subplot to look correct
+		if (len(layers) > 1):
+			ax[subplot].spines['right'].set_visible(False)
+			ax[subplot].spines['left'].set_visible(False)
+			ax[subplot].spines['top'].set_visible(False)
+			ax[subplot].xaxis.set_ticks_position('bottom')
+			ax[subplot].get_yaxis().set_ticklabels([])
+			ax[subplot].set_ylabel(layer.replace(':', ' ').title());
+		else:
+			ax.spines['right'].set_visible(False)
+			ax.spines['left'].set_visible(False)
+			ax.spines['top'].set_visible(False)
+			ax.xaxis.set_ticks_position('bottom')
+			ax.get_yaxis().set_ticklabels([])
+			ax.set_ylabel(layer.replace(':', ' ').title());
+		
+		if (layerVulnerabilities == []):
+			subplot += 1;
+			if (len(layers) == 1):
+				startDate, endDate = endDate, startDate;
+			continue;
+
 		#Pull the release and patch dates for this vulnerability and plot them
 		count = 1;
 		for vulnerability in layerVulnerabilities:
 			date = pd.to_datetime(vulnerability.datePublished);
 			date2 = date + pd.Timedelta(vulnerability.datePatched, unit='d')
-			ax[subplot].hlines(count, date, date2);
+
+			if (len(layers) > 1):
+				ax[subplot].hlines(count, date, date2);
+			else:
+				ax.hlines(count, date, date2);
+				
+			ax[-1].hlines(len(layers) - (subplot), date, date2, color='r');
 
 			#Set our new start/end for the x axis if neccessary
 			if (date < startDate):
@@ -490,27 +534,139 @@ def createTimeline(vulnerabilities, layers):
 				endDate = date2;
 			count += 1;
 
-		#Format this subplot to look correct
-		ax[subplot].spines['right'].set_visible(False)
-		ax[subplot].spines['left'].set_visible(False)
-		ax[subplot].spines['top'].set_visible(False)
-		ax[subplot].xaxis.set_ticks_position('bottom')
-		ax[subplot].get_yaxis().set_ticklabels([])
-		ax[subplot].set_ylabel(layer.replace(':', ' ').title());
-
+		ax[subplot].set_ylim([0, count]);
 		subplot += 1;
 	
-	fig.autofmt_xdate();
 
+	ax[-1].spines['right'].set_visible(False)
+	ax[-1].spines['left'].set_visible(False)
+	ax[-1].spines['top'].set_visible(False)
+	ax[-1].xaxis.set_ticks_position('bottom')
+	ax[-1].get_yaxis().set_ticklabels([])
+	ax[-1].set_ylim([0, subplot + 1]);
+	ax[-1].set_ylabel("Gaps In Layers");
+
+	fig.autofmt_xdate();
 
 	#Set the range of the x axis so everything looks nice
 	day = pd.Timedelta("100 days");
-	plt.xlim(startDate - day, endDate + day)
+	plt.xlim(startDate - day, pd.to_datetime('today'))
 
 	#Label things (title and x axis)
 	fig.suptitle("Vulnerabilities in Layered Solutions", fontsize=18);
 	plt.xlabel('Dates Vulnerable');
 	plt.show();
+
+
+
+#Create a plot that shows the gaps in each layer's security
+#@param vulnerabilities: a dictionary, each key is the layer name, each value is the list of vulnearbilities
+#@param layers: a list of the names of each layer to be plotted
+#returns nothing, simply prints the plot
+def createCombinedTimeline(vulnerabilities, layers):
+	fig, ax = plt.subplots(figsize = (7,7));
+
+	ax.spines['right'].set_visible(False)
+	ax.spines['left'].set_visible(False)
+	ax.spines['top'].set_visible(False)
+	ax.xaxis.set_ticks_position('bottom')
+	ax.get_yaxis().set_ticklabels([])
+	ax.set_ylabel("Layers");
+
+	#Default start and end dates for the x axis
+	startDate = pd.to_datetime("December 31, 2016");
+	endDate = pd.to_datetime("January 1, 1999");
+
+	#Gaps holds the final gaps for each layer
+	gaps = {};
+	for layer in layers:
+
+		#layerGaps is used for the gap finding algorithm, then added into the gaps list
+		layerGaps = [];
+		layerVulnerabilities = vulnerabilities[layer];
+
+		vulnStart = pd.to_datetime(layerVulnerabilities[0].datePublished);
+		vulnEnd = vulnStart + pd.Timedelta(layerVulnerabilities[0].datePatched, unit='d');
+		layerGaps.append([vulnStart, vulnEnd]);
+
+		#Get the start and end dates of each vulnerability
+		for vulnerability in layerVulnerabilities[1:]:
+			vulnStart = pd.to_datetime(vulnerability.datePublished);
+			vulnEnd = vulnStart + pd.Timedelta(vulnerability.datePatched, unit='d');
+
+			if (vulnStart < startDate):
+				startDate = vulnStart;
+			if (vulnEnd > endDate):
+				endDate = vulnEnd;
+
+			#Fancy insertion into the list so it is sorted from smallest date to largest
+			count = 0;
+			while (count < len(layerGaps) and vulnStart > layerGaps[count][0]):
+				count += 1;
+
+			if (count == len(layerGaps)):
+				layerGaps.append([vulnStart, vulnEnd]);
+			elif (layerGaps[count][0] == vulnStart):
+				if (layerGaps[count][1] > vulnStart):
+					layerGaps.insert(count + 1, [vulnStart, vulnEnd]);
+				else:
+					layerGaps.insert(count, [vulnStart, vulnEnd]);
+			else:
+				layerGaps.insert(count, [vulnStart, vulnEnd]);
+
+		#Condense the gaps where neccessary
+		count = 0;
+		while count < (len(layerGaps) - 1):
+			#Start dates are equivalent or the first start date is before the second
+			if (layerGaps[count][0] == layerGaps[count + 1][0] or (layerGaps[count][0] < layerGaps[count + 1][0] and layerGaps[count + 1][0] < layerGaps[count][1])):
+				#But the second end date is after the first
+				if (layerGaps[count][1] < layerGaps[count + 1][1]):
+					layerGaps[count][1] = layerGaps[count + 1][1];
+					del layerGaps[count + 1];
+				elif (layerGaps[count][1] > layerGaps[count + 1][1]):
+					del layerGaps[count + 1];
+				else:
+					count += 1;
+			else:
+				count += 1;
+
+		print("Gaps for " + layer);
+		for gap in layerGaps:
+			print("Start: " + str(gap[0]));
+			print("End: " + str(gap[1]));
+			print();
+
+		#Holds all the gaps for each layer
+		gaps[layer] = layerGaps;
+
+	#Plot a horizontal line for each layer and white out the gaps
+	#-Need to label each tick with its respective layer
+	day = pd.Timedelta("100 days");
+	count = 0;
+	for layer in layers:
+		previousGap = None;
+		for gap in gaps[layer]:	
+			if (gap == gaps[layer][0]):
+				ax.hlines(count, startDate - day, gap[0]);
+				previousGap = gap;
+			elif(gap == gaps[layer][-1]):
+				ax.hlines(count, previousGap[1], gap[0]);
+				ax.hlines(count, gap[1], endDate + day);
+			else:
+				ax.hlines(count, previousGap[1], gap[0]);
+				previousGap = gap;
+		count += 1;
+
+	fig.autofmt_xdate();
+
+	#Set the range of the x axis so everything looks nice
+	plt.xlim(startDate - day, pd.to_datetime('today'))
+
+	#Label things (title and x axis)
+	fig.suptitle("Security Gaps in Layered Solutions", fontsize=18);
+	plt.xlabel('Dates Vulnerable');
+	plt.show();
+	#DOESN'T WORK WITH MORE THAN 1 LAYER
 
 
 
@@ -654,6 +810,7 @@ def main(argv):
 			print();
 
 	createTimeline(layerVulnerabilities, layers);
+	#createCombinedTimeline(layerVulnerabilities, layers);
 
 
 #Ensures this only runs if parse.py is the main file called
