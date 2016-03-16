@@ -547,24 +547,12 @@ def createTimeline(vulnerabilities, layers):
 
 
 
-#Create a plot that shows the gaps in each layer's security
+#Condenses the security gaps (vulnerabilities) into the smallest number possible
 #@param vulnerabilities: a dictionary, each key is the layer name, each value is the list of vulnearbilities
 #@param layers: a list of the names of each layer to be plotted
-#returns nothing, simply prints the plot
-def createCombinedTimeline(vulnerabilities, layers):
-	fig, ax = plt.subplots(figsize = (7,7));
-
-	ax.spines['right'].set_visible(False)
-	ax.spines['left'].set_visible(False)
-	ax.spines['top'].set_visible(False)
-	ax.xaxis.set_ticks_position('bottom')
-	ax.get_yaxis().set_ticklabels([])
-	ax.set_ylabel("Layers");
-
-	#Default start and end dates for the x axis
-	startDate = pd.to_datetime("December 31, 2016");
-	endDate = pd.to_datetime("January 1, 1999");
-
+#returns a dictionary where they key is the layer name and the value is a 2d list
+#-this 2d list is simply a list where each index holds 2 values, the start of the security gap and the end of the security gap
+def findSecurityGaps(vulnerabilities, layers):
 	#Gaps holds the final gaps for each layer
 	gaps = {};
 	for layer in layers:
@@ -581,11 +569,6 @@ def createCombinedTimeline(vulnerabilities, layers):
 		for vulnerability in layerVulnerabilities[1:]:
 			vulnStart = pd.to_datetime(vulnerability.datePublished);
 			vulnEnd = vulnStart + pd.Timedelta(vulnerability.datePatched, unit='d');
-
-			if (vulnStart < startDate):
-				startDate = vulnStart;
-			if (vulnEnd > endDate):
-				endDate = vulnEnd;
 
 			#Fancy insertion into the list so it is sorted from smallest date to largest
 			count = 0;
@@ -618,43 +601,10 @@ def createCombinedTimeline(vulnerabilities, layers):
 			else:
 				count += 1;
 
-		print("Gaps for " + layer);
-		for gap in layerGaps:
-			print("Start: " + str(gap[0]));
-			print("End: " + str(gap[1]));
-			print();
-
 		#Holds all the gaps for each layer
 		gaps[layer] = layerGaps;
 
-	#Plot a horizontal line for each layer and white out the gaps
-	#-Need to label each tick with its respective layer
-	day = pd.Timedelta("100 days");
-	count = 0;
-	for layer in layers:
-		previousGap = None;
-		for gap in gaps[layer]:	
-			if (gap == gaps[layer][0]):
-				ax.hlines(count, startDate - day, gap[0]);
-				previousGap = gap;
-			elif(gap == gaps[layer][-1]):
-				ax.hlines(count, previousGap[1], gap[0]);
-				ax.hlines(count, gap[1], endDate + day);
-			else:
-				ax.hlines(count, previousGap[1], gap[0]);
-				previousGap = gap;
-		count += 1;
-
-	fig.autofmt_xdate();
-
-	#Set the range of the x axis so everything looks nice
-	plt.xlim(startDate - day, pd.to_datetime('today'))
-
-	#Label things (title and x axis)
-	fig.suptitle("Security Gaps in Layered Solutions", fontsize=18);
-	plt.xlabel('Dates Vulnerable');
-	plt.show();
-	#DOESN'T WORK WITH MORE THAN 1 LAYER
+	return gaps;
 
 
 
@@ -798,7 +748,6 @@ def main(argv):
 			print();
 
 	createTimeline(layerVulnerabilities, layers);
-	#createCombinedTimeline(layerVulnerabilities, layers);
 
 
 #Ensures this only runs if parse.py is the main file called
