@@ -61,9 +61,9 @@ namespace = {'entry': 'http://scap.nist.gov/schema/feed/vulnerability/2.0',
 
 
 #Names of each xml file to parse
-fileNames = [#'nvdcve-2.0-2002.xml', 'nvdcve-2.0-2003.xml', 'nvdcve-2.0-2004.xml', 'nvdcve-2.0-2005.xml', 
-			 #'nvdcve-2.0-2006.xml', 'nvdcve-2.0-2007.xml', 'nvdcve-2.0-2008.xml', 'nvdcve-2.0-2009.xml', 
-			 #'nvdcve-2.0-2010.xml', 'nvdcve-2.0-2011.xml', 'nvdcve-2.0-2012.xml', 'nvdcve-2.0-2013.xml', 
+fileNames = ['nvdcve-2.0-2002.xml', 'nvdcve-2.0-2003.xml', 'nvdcve-2.0-2004.xml', 'nvdcve-2.0-2005.xml', 
+			 'nvdcve-2.0-2006.xml', 'nvdcve-2.0-2007.xml', 'nvdcve-2.0-2008.xml', 'nvdcve-2.0-2009.xml', 
+			 'nvdcve-2.0-2010.xml', 'nvdcve-2.0-2011.xml', 'nvdcve-2.0-2012.xml', 'nvdcve-2.0-2013.xml', 
 			 'nvdcve-2.0-2014.xml', 'nvdcve-2.0-2015.xml', 'nvdcve-2.0-2016.xml']
 
 
@@ -86,7 +86,7 @@ helpText 	= """
 
 #Specifies information about the creation of this project
 aboutText 	= """Produced as part of the INSuRE Project at Purdue University, Spring 2016 by Robert Haverkos and Daniel Sokoler
-Professors: Dr. Melissa Dark, Dr. John Springer
+Professors: Dr. Melissa Dark, Dr. John Springer, Dr. Filipo Sharevski
 Technical Directors: Trent Pitsenbarger, Bill Layton""";
 
 
@@ -493,20 +493,12 @@ def createTimeline(vulnerabilities, layers):
 		ax[-1].hlines(len(layers) - (subplot), pd.to_datetime("January 1, 1999"), pd.to_datetime("December 31, 2016"));
 
 		#Format this subplot to look correct
-		if (len(layers) > 1):
-			ax[subplot].spines['right'].set_visible(False)
-			ax[subplot].spines['left'].set_visible(False)
-			ax[subplot].spines['top'].set_visible(False)
-			ax[subplot].xaxis.set_ticks_position('bottom')
-			ax[subplot].get_yaxis().set_ticklabels([])
-			ax[subplot].set_ylabel(layer.replace(':', ' ').title());
-		else:
-			ax.spines['right'].set_visible(False)
-			ax.spines['left'].set_visible(False)
-			ax.spines['top'].set_visible(False)
-			ax.xaxis.set_ticks_position('bottom')
-			ax.get_yaxis().set_ticklabels([])
-			ax.set_ylabel(layer.replace(':', ' ').title());
+		ax[subplot].spines['right'].set_visible(False)
+		ax[subplot].spines['left'].set_visible(False)
+		ax[subplot].spines['top'].set_visible(False)
+		ax[subplot].xaxis.set_ticks_position('bottom')
+		ax[subplot].get_yaxis().set_ticklabels([])
+		ax[subplot].set_ylabel(layer.replace(':', ' ').title());
 		
 		if (layerVulnerabilities == []):
 			subplot += 1;
@@ -519,12 +511,8 @@ def createTimeline(vulnerabilities, layers):
 		for vulnerability in layerVulnerabilities:
 			date = pd.to_datetime(vulnerability.datePublished);
 			date2 = date + pd.Timedelta(vulnerability.datePatched, unit='d')
-
-			if (len(layers) > 1):
-				ax[subplot].hlines(count, date, date2);
-			else:
-				ax.hlines(count, date, date2);
-				
+			
+			ax[subplot].hlines(count, date, date2);
 			ax[-1].hlines(len(layers) - (subplot), date, date2, color='r');
 
 			#Set our new start/end for the x axis if neccessary
