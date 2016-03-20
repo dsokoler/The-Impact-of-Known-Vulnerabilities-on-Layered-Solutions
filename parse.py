@@ -13,6 +13,9 @@
 from tqdm import tqdm
 import sys, getopt, random
 
+#These three are for downloading and unzipping the NVD files
+import requests, zipfile, io
+
 #Numpy is a dependency of MatPlotLib
 try:
 	import numpy;
@@ -43,6 +46,7 @@ except ImportError:
 
 
 totalVulnerabilities = 0;
+verbose = False;
 
 
 
@@ -62,6 +66,24 @@ fileNames = ['nvdcve-2.0-2002.xml', 'nvdcve-2.0-2003.xml', 'nvdcve-2.0-2004.xml'
 			 'nvdcve-2.0-2006.xml', 'nvdcve-2.0-2007.xml', 'nvdcve-2.0-2008.xml', 'nvdcve-2.0-2009.xml', 
 			 'nvdcve-2.0-2010.xml', 'nvdcve-2.0-2011.xml', 'nvdcve-2.0-2012.xml', 'nvdcve-2.0-2013.xml', 
 			 'nvdcve-2.0-2014.xml', 'nvdcve-2.0-2015.xml', 'nvdcve-2.0-2016.xml']
+
+
+
+fileURLs = ['https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2002.xml.zip',
+			'https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2003.xml.zip',
+			'https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2004.xml.zip',
+			'https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2005.xml.zip',
+			'https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2006.xml.zip',
+			'https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2007.xml.zip',
+			'https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2008.xml.zip',
+			'https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2009.xml.zip',
+			'https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2010.xml.zip',
+			'https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2011.xml.zip',
+			'https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2012.xml.zip',
+			'https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2013.xml.zip',
+			'https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2014.xml.zip',
+			'https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2015.xml.zip',
+			'https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2016.xml.zip']
 
 
 
@@ -505,7 +527,12 @@ def createTimeline(vulnerabilities, layers):
 
 		#Pull the release and patch dates for this vulnerability and plot them
 		count = 1;
+		filename = layer.replace(':', '_') + ".txt";
+		sys.stdout = open(filename, 'w');
 		for vulnerability in layerVulnerabilities:
+			vulnerability.printVuln();
+			#print(vulnerability.cve);
+
 			date = pd.to_datetime(vulnerability.datePublished);
 			date2 = date + pd.Timedelta(vulnerability.datePatched, unit='d')
 			
@@ -518,6 +545,8 @@ def createTimeline(vulnerabilities, layers):
 			if (date2 > endDate):
 				endDate = date2;
 			count += 1;
+
+		sys.stdout = sys.__stdout__;
 
 		ax[subplot].set_ylim([0, count]);
 		subplot += 1;
@@ -630,6 +659,30 @@ def generateRandomPatchTime(patchTime, start, end):
 
 
 
+#Downloads and unzips the NVD files
+#Returns nothing.  If files are successfully downloaded and unzipped
+# the fileNames global is replaced with those that were downloaded.
+def downloadNVDFiles():
+	files = [];
+
+	print("Downloading NVD XML Files")
+	for url in tqdm(fileURLs):
+		r = requests.get(url, stream=True);
+
+		if (not r.ok):
+			print("Error downloading file from \'" + url + "\'");
+			continue;
+
+		z = zipfile.ZipFile(io.BytesIO(r.content));
+		z.extractall();
+		
+		files.append(z.infolist()[0].filename);
+
+	if (file != []):
+		global fileNames;
+		fileNames = files;
+	print();
+
 
 #Main method	
 #-h: 			print the help string, must be the first argument
@@ -642,9 +695,10 @@ def generateRandomPatchTime(patchTime, start, end):
 #--avail=?: 	lowest level of availability impact that makes a vulnerability relevant	
 #--layers=?:	a comma separated list of the layers we are interested in looking at
 #--patchtime=?: the average time it takes from when a patch is released to when it is applied
+#--download:	download the latest NVD files from their website
 #Options that begin with "--" should have their argument be a number, either 0 1 or 2
-optionsList = "h";
-longOptionsList = ["score=", "av=", "ac=", "auth=", "conf=", "int=", "avail=", "layers=", "patchtime="]
+optionsList = "hv";
+longOptionsList = ["score=", "av=", "ac=", "auth=", "conf=", "int=", "avail=", "layers=", "patchtime=", "download"]
 def main(argv):
 
 	print();
@@ -675,6 +729,9 @@ def main(argv):
 		if(opt == "-h"):
 			print(helpText);
 			sys.exit(2);
+		elif(opt == "-v"):
+			global verbose;
+			verbose = True;
 		elif (opt == "--score"):
 			minScore = float(arg);
 			if (minScore < 0 or minScore > 10):
@@ -714,6 +771,9 @@ def main(argv):
 				print("this option should be a positive number");
 				print();
 				sys.exit(1);
+		elif (opt == "--download"):
+			print();
+			downloadNVDFiles();
 
 	#Ensure we have a set of layers to analyze
 	if (hasLayer == False):
