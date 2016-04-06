@@ -11,7 +11,8 @@
 
 #TQDM is the progress bar
 from tqdm import tqdm
-import sys, getopt, random
+import sys, getopt, random, copy
+import xml.dom.minidom as minidom;
 
 #These three are for downloading and unzipping the NVD files
 import requests, zipfile, io
@@ -40,10 +41,18 @@ except ImportError:
 #lxml is a more advanced xml processor
 try:
 	from lxml import etree
+	print("Using lxml");
 except ImportError:
 	import xml.etree.ElementTree as etree
+	print("Using ElementTree");
+print();
 
 
+
+#The default values for the "filter" variables
+minCVSS 			= None;
+patchTime 			= 7;
+outputFile			= "";
 
 totalVulnerabilities = 0;
 
@@ -51,12 +60,12 @@ totalVulnerabilities = 0;
 
 #Namespaces for NVD CVE
 namespace = {'entry': 'http://scap.nist.gov/schema/feed/vulnerability/2.0',
-	  		 'cvss': 'http://scap.nist.gov/schema/cvss-v2/0.2',
-	  		 'vuln': 'http://scap.nist.gov/schema/vulnerability/0.4',
-	  		 'scap-core': 'http://scap.nist.gov/schema/scap-core/0.1',
-	  		 'xsi': 'http://www.w3.org/2001/XMLSchema-instance',
-	  		 'patch': 'http://scap.nist.gov/schema/patch/0.1',
-	  		 'cpe-lang': 'http://cpe.mitre.org/language/2.0'}
+			 'cvss': 'http://scap.nist.gov/schema/cvss-v2/0.2',
+			 'vuln': 'http://scap.nist.gov/schema/vulnerability/0.4',
+			 'scap-core': 'http://scap.nist.gov/schema/scap-core/0.1',
+			 'xsi': 'http://www.w3.org/2001/XMLSchema-instance',
+			 'patch': 'http://scap.nist.gov/schema/patch/0.1',
+			 'cpe-lang': 'http://cpe.mitre.org/language/2.0'}
 
 
 
@@ -112,7 +121,7 @@ helpText 	= """
 #Specifies information about the creation of this project
 aboutText 	= """Produced as part of the INSuRE Project at Purdue University, Spring 2016 by Daniel Sokoler and Robert Haverkos
 Professors: Dr. Melissa Dark, Dr. John Springer, Dr. Filipo Sharevski
-Technical Directors: Trent Pitsenbarger, Bill Layton""";
+Technical Director: Trent Pitsenbarger (NSA)""";
 
 
 
@@ -254,12 +263,81 @@ class CVSS:
 		else:
 			print(str(self.availability));
 
+	def compareScore(self, score):
+		if (self.score <= score):
+			return True;
+		else:
+			return False;
+
+	def compareVector(self, vector):
+		if (self.vector <= vector):
+			return True;
+		else:
+			return False;
+
+	def compareComplexity(self, complexity):
+		if (self.complexity <= complexity):
+			return True;
+		else:
+			return False;
+
+	def compareAuthentication(self, authentication):
+		if (self.authentication <= authentication):
+			return True;
+		else:
+			return False;
+
+	def compareConfidentiality(self, confidentiality):
+		if (self.confidentiality <= confidentiality):
+			return True;
+		else:
+			return False;
+
+	def compareIntegrity(self, integrity):
+		if (self.integrity <= integrity):
+			return True;
+		else:
+			return False;
+
+	def compareAvailability(self, availability):
+		if (self.Availability <= availability):
+			return True;
+		else:
+			return False;
+
+	def compareCVSS(self, cvss):
+		if (not self.compareScore(cvss.score)):
+			return False;
+		if (not self.compareVector(cvss.vector)):
+			return False;
+		if (not self.compareComplexity(cvss.complexity)):
+			return False;
+		if (not self.compareAuthentication(cvss.authentication)):
+			return False;
+		if (not self.compareConfidentiality(cvss.confidentiality)):
+			return False;
+		if (not self.compareIntegrity(cvss.integrity)):
+			return False;
+		if (not self.compareAuthentication(cvss.authentication)):
+			return False;
+
+		return True;
+
+
+
 
 
 #Convert the string values of exploitability ratings to their numerical value
 #@param attribute: a string representing an attribute of a vulnerability
 #returns the attribute in integer form, -1 if invalid
 def getExploitabilityRating(attribute):
+	if (isinstance(attribute, int)):
+		if (attribute < 3 and attribute > -1):
+			return attribute;
+		else :
+			print("INCORRECT EXPLOITABILITY RATING: " + attribute)
+			return -1;
+
 	if (attribute == "LOCAL" or attribute == "HIGH" or attribute == "MULTIPLE_INSTANCES"):
 		return 0;
 	elif (attribute == "ADJACENT_NETWORK" or attribute == "MEDIUM" or attribute == "SINGLE_INSTANCE"):
@@ -274,6 +352,13 @@ def getExploitabilityRating(attribute):
 #@param attribute: a string representing an attribute of a vulnerability
 #returns the attribute in integer form, -1 if invalid
 def getImpactMetrics(attribute):
+	if (isinstance(attribute, int)):
+		if (attribute < 3 and attribute > -1):
+			return attribute;
+		else :
+			print("INCORRECT EXPLOITABILITY RATING: " + attribute)
+			return -1;
+
 	if (attribute == "NONE"):
 		return 0;
 	elif(attribute == "PARTIAL"):
@@ -286,68 +371,144 @@ def getImpactMetrics(attribute):
 
 
 
+#Attempts to print xml in a readable format
+#@param elem: the xml string to prettify
+#returns a readable, tabbed, good looking xml document
+def prettify(elem):
+	rough_string = etree.tostring(elem, encoding='utf8', method='xml');
+	reparsed = minidom.parseString(rough_string)
+	return '\n'.join([line for line in reparsed.toprettyxml(indent='	').split('\n') if line.strip()])
+
+
 #Basic parsing of the xml file
-#@param 'filename': the name of the file to parse, in string format
-#returns a list of vulnerability objects
-def parse(filename):
-	vulnerabilityList = []
+#@param 'layers': a list of the layers to be parsed for
+#returns a dictionary of lists of vulnerability objects, one list per layer
+def parse(layers):
+	global minCVSS, patchTime, outputFile;
+
+	vulnerabilityXMLRoot = None;
+
+	vulnerabilityList = {};
+	for layer in layers:
+		vulnerabilityList[layer] = [];
 	
-	#Attempt to parse the given file, catch the error if that file is not found
-	try:
-		tree = etree.parse(filename);
-	except FileNotFoundError:
-		print("Unable to open file " + filename);
-		return vulnerabilityList;
-		
-	root = tree.getroot();
-
-
-	for entry in root.findall('entry:entry', namespace):
-		cveSummary = entry.find('.//vuln:summary', namespace);
-		if (cveSummary != None):
-			cveSummary = cveSummary.text;
-
-		#'** REJECT **' indicates this vulnerability entry is invalid and should be ignored
-		if (cveSummary != None and "** REJECT **" in cveSummary):
+	global fileNames;
+	for filename in tqdm(fileNames):
+		#Attempt to parse the given file, catch the error if that file is not found
+		try:
+			tree = etree.parse(filename);
+		except FileNotFoundError:
+			print("Unable to open file " + filename);
 			continue;
+			
+		#Get the root of this file's XML tree
+		root = tree.getroot();
 
-		#The CVE of this vulnerability
-		cveID = entry.attrib['id'];
+		#Begin building the filtered XML tree
+		if (vulnerabilityXMLRoot == None):
+			vulnerabilityXMLRoot = copy.deepcopy(root);
+			
+			#Variables for getting the XML namespaces
+			nsRoot = None;
+			ns_map = [];
+			events = "start", "start-ns";
 
-		#The list of vulnerable products this vulnerability affects
-		productList = getProducts(entry);
+			#Pull the XML namespaces out and register then with ElementTree
+			for event, elem in etree.iterparse(filename, events):
+				if (event == "start-ns"):
+					ns_map.append(elem);
+				elif (event == "start"):
+					if (nsRoot == None):
+						nsRoot = elem;
+					for prefix, uri in ns_map:
+						etree.register_namespace(prefix, uri);
+					ns_map = [];
+			
+			#Remove all entries from the new tree
+			#CAN MERGE WITH THE FOR LOOP BELOW THIS ONE, AND POTENTIALLY WITH ITERPARSE ABOVE
+			for entry in vulnerabilityXMLRoot.findall('entry:entry', namespace):
+				vulnerabilityXMLRoot.remove(entry);
 
-		#The date this vulnerability was published (YYYY-MM-DD)
-		datePublished = entry.find('.//vuln:published-datetime', namespace);
+		#Iterate through all vulnerability entries in this file's XML tree
+		for entry in root.findall('entry:entry', namespace):
 
-		#Validate the date this vulnerability was published
-		if (datePublished == None):
-			datePublished = "No Publish Date";
-		else:
-			datePublishedText 	= datePublished.text;
-			datePublished 		= datePublishedText.split('T', 1)[0];
+			#Keep track of the total number of vulnerabilities seen
+			global totalVulnerabilities;
+			totalVulnerabilities += 1;
 
-		#Generate a random patch date for this vulnerability (will be changed when wehave actual patch dates)
-		datePatched = generateRandomPatchTime(7, 2, 150);
+			#Grab the summary section for this vulnerability entry
+			cveSummary = entry.find('.//vuln:summary', namespace);
+			if (cveSummary != None):
+				cveSummary = cveSummary.text;
 
-		#Holds all the information regarding this vulnerability's CVSS score
-		cvssObject = getCVSS(entry);
+			#'** REJECT **' indicates this vulnerability entry is invalid and should be ignored
+			if (cveSummary != None and "** REJECT **" in cveSummary):
+				root.remove(entry);
+				continue;
 
-		#The CWE identifier for this vulnerability
-		cweID = getCWE(entry);
+			#The CVE of this vulnerability
+			cveID = entry.attrib['id'];
 
-		#A list of all URL references for this vulnerability
-		referenceList = getReferences(entry);
+			#The list of vulnerable products this vulnerability affects
+			productList = getProducts(entry);
+			if (productList == None):
+				root.remove(entry);
+				continue;
 
-		#Create the vulnerability object
-		vulnerability = Vulnerability(cveID, productList, datePublished, datePatched,
-									  cvssObject, cweID, referenceList, cveSummary);
+			#Check if this vulnerability affects one of our layers
+			affectedLayers = [];
+			for product in productList:
+				for layer in layers:
+					if (layer in product and layer not in affectedLayers):
+						affectedLayers.append(layer);
+			if (affectedLayers == []):
+				root.remove(entry);
+				continue;
 
-		#Store this vulnerability
-		vulnerabilityList.append(vulnerability);
+			#The date this vulnerability was published (YYYY-MM-DD)
+			datePublished = entry.find('.//vuln:published-datetime', namespace);
 
-		global totalVulnerabilities;
-		totalVulnerabilities += 1;
+			#Validate the date this vulnerability was published
+			if (datePublished == None):
+				continue;
+			else:
+				datePublishedText 	= datePublished.text;
+				datePublished 		= datePublishedText.split('T', 1)[0];
+
+			#Generate a random patch date for this vulnerability (will be changed when wehave actual patch dates)
+			global patchTime;
+			datePatched = generateRandomPatchTime(patchTime, 2, 150);
+
+			#Holds all the information regarding this vulnerability's CVSS score
+			cvssObject = getCVSS(entry);
+			match = minCVSS.compareCVSS(cvssObject);
+			if (not match):
+				root.remove(entry);
+				continue;
+
+			#The CWE identifier for this vulnerability
+			cweID = getCWE(entry);
+
+			#A list of all URL references for this vulnerability
+			referenceList = getReferences(entry);
+
+			#Create the vulnerability object
+			vulnerability = Vulnerability(cveID, productList, datePublished, datePatched,
+										  cvssObject, cweID, referenceList, cveSummary);
+
+			#Store this vulnerability
+			for affectedLayer in affectedLayers:
+				if (affectedLayer not in vulnerabilityList.keys()):
+					vulnerabilityList[affectedLayer] = [];
+				vulnerabilityList[affectedLayer].append(vulnerability);
+				vulnerabilityXMLRoot.append(entry);
+
+	#Need to duplicate one of the roots, then add relevant vulnerability entries to that new tree
+	#-Can't remove bad ones from root b/c root isn't in this scope
+	file = "TESTINGOUTPUT.txt";
+	sys.stdout = open(file, 'w');
+	print(prettify(vulnerabilityXMLRoot));
+	sys.stdout = sys.__stdout__;
 
 	return vulnerabilityList;
 	
@@ -782,7 +943,7 @@ optionsList = "h";
 longOptionsList = ["score=", "av=", "ac=", "auth=", 
 				   "conf=", "int=", "avail=", "layers=", 
 				   "patchtime=", "download", "output=", 
-				   "intput="];
+				   "input="];
 def main(argv):
 
 	print();
@@ -790,6 +951,7 @@ def main(argv):
 	print();
 
 	#The default values for the "filter" variables
+	global minCVSS, patchTime, fileNames, outputFile, layers;
 	minScore 			= 0;
 	minAccess 			= 0;
 	minComplexity 		= 0;
@@ -798,8 +960,7 @@ def main(argv):
 	minIntegrity 		= 0;
 	minAvailability 	= 0;
 	patchTime 			= 7;
-	inputFiles			= None
-	outputFile			= "";
+	outputFile			= None;
 
 
 	#Get the options and their arguments from the command line
@@ -843,12 +1004,12 @@ def main(argv):
 			minAvailability = int(arg);
 			checkOptErr(opt, minAvailability);
 		elif (opt == "--layers"):
-			layers = arg.replace(" ", ":");
+			layers = arg.replace(' ', ':');
 			layers = layers.lower();
 			layers = layers.split(',');
 			hasLayer = True;
 		elif (opt == "--patchtime"):
-			patchTime = arg;
+			patchTime = int(arg);
 			if (patchTime < 0):
 				print();
 				print("Invalid --patchtime option: " + patchTime);
@@ -860,40 +1021,40 @@ def main(argv):
 			downloadNVDFiles();
 		elif (opt == "--input"):
 			inputFiles = arg.split(',');
+			for file in inputFiles:
+				file = file.lstrip(' ');
+				file = file.rstrip(' ');
+			fileNames = inputFiles;
 		elif (opt == "--output"):
+			outputFile = arg.lstrip(' ');
+			outputFile = outputFile.rstrip(' ');
 			outputFile = arg;
+
+	minCVSS = CVSS(minScore, minAccess, minComplexity, minAuthentication, minConfidentiality, minIntegrity, minAvailability);
 
 	#Ensure we have a set of layers to analyze
 	if (hasLayer == False):
 		print("Please specify one or more layers to analyze.");
 		sys.exit(1);
 
-	#Holds all vulnerabilities
-	vulnerabilities = [];
-
 	#The bulk of this program, the actual gathering of data happens here, and in the parse method
 	print();
 	print("Analyzing NVD XML Files");
-	for name in tqdm(fileNames):
-		vulnerabilityList = parse(name);
-		vulnerabilities.extend(vulnerabilityList);
+	vulnerabilityList = parse(layers);
 
 	print("Total Vulnerabilities: " + str(totalVulnerabilities));
 
-	#Keeps track of each set of vulnerabilities: key is the layer, value is a list of that layer's vulnerabilities
-	layerVulnerabilities = {};
-
 	#Get the vulnerabilities for each layer, filter them by the specified criteria, and visualize them
-	for layer in layers:
-		layerList = findProducts(vulnerabilities, layer);
-		layerListFiltered = filterVulnerabilities(layerList, layer, minScore, minAccess, minComplexity, minAuthentication, minConfidentiality, minIntegrity, minAvailability);
-		layerVulnerabilities[layer] = layerListFiltered;
-		if (layerListFiltered == []):
-			print("No vulnerabilities for " + layer + ".");
-			print();
+	#for layer in layers:
+	#	layerList = findProducts(vulnerabilities, layer);
+	#	layerListFiltered = filterVulnerabilities(layerList, layer, minScore, minAccess, minComplexity, minAuthentication, minConfidentiality, minIntegrity, minAvailability);
+	#	layerVulnerabilities[layer] = layerListFiltered;
+	#	if (layerListFiltered == []):
+	#		print("No vulnerabilities for " + layer + ".");
+	#		print();
 
-	createTimeline(layerVulnerabilities, layers);
-	createTimelinePoints(layerVulnerabilities, layers);
+	createTimeline(vulnerabilityList, layers);
+	createTimelinePoints(vulnerabilityList, layers);
 
 
 #Ensures this only runs if parse.py is the main file called
