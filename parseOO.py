@@ -1,14 +1,3 @@
-#Suggestions
-#-Data persistence.
-# -separate this script into two:
-#  -1: data parser, reads in the raw data from the xml and creates the object lists
-#  -2: visualizer, visualizes those object lists (that may be stored on)
-#
-#Issues
-#-When 1 plot has no data and another has data the x axis values get all screwed up
-#
-
-
 #TQDM is the progress bar
 from tqdm import tqdm
 import sys, getopt, random, copy
@@ -40,11 +29,10 @@ except ImportError:
 
 #lxml is a more advanced xml processor
 try:
-	from lxml import etree
-	print("Using lxml");
-except ImportError:
 	import xml.etree.ElementTree as etree
-	print("Using ElementTree");
+except ImportError:
+	print("Error importing ElementTree, please check your python installation");
+	sys.exit(1);
 print();
 
 
@@ -581,66 +569,6 @@ def getProducts(entry):
 
 
 
-#Finds all vulnerabilities with 'name' in the products list
-#@param vulnerabilities: the list of vulnerabilities to be searched for (by name)
-#@param name: the name to search each vulnerablity for
-#returns a list of vulnerability objects that all have 'name' in their product list
-def findProducts(vulnerabilities, name):
-	count = 0;
-	vulnerableEntries = [];
-	for vulnerability in tqdm(vulnerabilities):
-		if (vulnerability.products == None or vulnerability.products == []):
-			continue;
-
-		for product in vulnerability.products:
-			if (name in product):
-				count += 1;
-				vulnerableEntries.append(vulnerability);
-				break;
-
-	return vulnerableEntries;
-
-
-
-#Returns a list of vulnerabilities that match the criteria specified in this function's arguments
-def filterVulnerabilities(vulnerabilities, name, minScore, minAccess, minComplexity, minAuthentication, minConfidentiality, minIntegrity, minAvailability):
-	validVulnerabilities = [];
-	count = 0;
-
-	print();
-	print("Finding all relevant vulnerabilities for \"" + name + "\": ", end="");
-	
-	#score, vector, complexity, authentication, confidentiality, integrity, availability
-	for vulnerability in vulnerabilities:
-		cvss = vulnerability.cvss;
-		
-		#Giant mash of tests for the vulnerability to pass (or not)
-		if (cvss == None):
-			continue;
-		if (cvss.score < minScore):
-			continue;
-		if (cvss.vector < minAccess):
-			continue;
-		if (cvss.complexity < minComplexity):
-			continue;
-		if (cvss.authentication < minAuthentication):
-			continue;
-		if (cvss.confidentiality < minConfidentiality):
-			continue;
-		if (cvss.integrity < minIntegrity):
-			continue;
-		if (cvss.availability < minAvailability):
-			continue;
-
-		validVulnerabilities.append(vulnerability);
-		count += 1;
-
-	print(str(count));
-
-	return validVulnerabilities;
-
-
-
 #Search a vulnerability's summary for a string
 #@param vulnerabilities: a list of vulnerabilities to search
 #@param filter: the filter to apply to each vulnerability's summary
@@ -668,11 +596,11 @@ def createTimeline(vulnerabilities, layers):
 	fig, ax = plt.subplots(len(layers) + 1, sharex=True);
 	
 	#Default start and end dates for the x axis
-	#startDate = pd.to_datetime("December 31, 2016");
-	#endDate = pd.to_datetime("January 1, 1999");
+	startDate = pd.to_datetime("December 31, 2016");
+	endDate = pd.to_datetime("January 1, 1999");
 
-	startDate = pd.to_datetime("January 1, 2010");
-	endDate = pd.to_datetime("December 31, 2016");
+	#startDate = pd.to_datetime("January 1, 2010");
+	#endDate = pd.to_datetime("December 31, 2016");
 
 	#Create a subplot for each layer
 	subplot = 0;
@@ -711,10 +639,10 @@ def createTimeline(vulnerabilities, layers):
 			ax[-1].hlines(len(layers) - (subplot), date, date2, color='r', linewidth=3);
 
 			#Set our new start/end for the x axis if neccessary
-			#if (date < startDate):
-			#	startDate = date;
-			#if (date2 > endDate):
-			#	endDate = date2;
+			if (date < startDate):
+				startDate = date;
+			if (date2 > endDate):
+				endDate = date2;
 			count += 1;
 
 		sys.stdout = sys.__stdout__;
@@ -752,11 +680,11 @@ def createTimelinePoints(vulnerabilities, layers):
 	colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k']
 
 	#Default start and end dates for the x axis
-	#startDate = pd.to_datetime("December 31, 2016");
-	#endDate = pd.to_datetime("January 1, 1999");
+	startDate = pd.to_datetime("December 31, 2016");
+	endDate = pd.to_datetime("January 1, 1999");
 
-	startDate = pd.to_datetime("January 1, 2010");
-	endDate = pd.to_datetime("December 31, 2016");
+	#startDate = pd.to_datetime("January 1, 2010");
+	#endDate = pd.to_datetime("December 31, 2016");
 
 	colorPointer = 0;
 
@@ -774,10 +702,10 @@ def createTimelinePoints(vulnerabilities, layers):
 			layerVulns.append(date);
 
 			#Set our new start/end for the x axis if neccessary
-			#if (date < startDate):
-			#	startDate = date;
-			#if (date > endDate):
-			#	endDate = date;
+			if (date < startDate):
+				startDate = date;
+			if (date > endDate):
+				endDate = date;
 			yCount.append(count);
 			count += 1;
 
@@ -1044,17 +972,8 @@ def main(argv):
 
 	print("Total Vulnerabilities: " + str(totalVulnerabilities));
 
-	#Get the vulnerabilities for each layer, filter them by the specified criteria, and visualize them
-	#for layer in layers:
-	#	layerList = findProducts(vulnerabilities, layer);
-	#	layerListFiltered = filterVulnerabilities(layerList, layer, minScore, minAccess, minComplexity, minAuthentication, minConfidentiality, minIntegrity, minAvailability);
-	#	layerVulnerabilities[layer] = layerListFiltered;
-	#	if (layerListFiltered == []):
-	#		print("No vulnerabilities for " + layer + ".");
-	#		print();
-
 	createTimeline(vulnerabilityList, layers);
-	createTimelinePoints(vulnerabilityList, layers);
+	#createTimelinePoints(vulnerabilityList, layers);
 
 
 #Ensures this only runs if parse.py is the main file called
