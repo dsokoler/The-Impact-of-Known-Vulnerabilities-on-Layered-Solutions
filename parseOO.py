@@ -6,26 +6,28 @@ import xml.dom.minidom as minidom;
 #These three are for downloading and unzipping the NVD files
 import requests, zipfile, io
 
+importError = False;
+
 #Numpy is a dependency of MatPlotLib
 try:
 	import numpy;
 except ImportError:
 	print("Please install NumPy: \"pip install numpy\"");
-	sys.exit(1);
+	importError = True;
 
 #Pandas is for datetimes
 try:
 	import pandas as pd
 except ImportError:
 	print("Please install Pandas: \"pip install pandas\"");
-	sys.exit(1);
+	importError = True;
 
 #MatPlotLib is for the visualization
 try:
 	import matplotlib.pyplot as plt;
 except ImportError:
 	print("Please install MatPlotLib: \"pip install matplotlib\"");
-	sys.exit(1);
+	importError = True;
 
 #lxml is a more advanced xml processor
 try:
@@ -34,6 +36,9 @@ except ImportError:
 	print("Error importing ElementTree, please check your python installation");
 	sys.exit(1);
 print();
+
+if (importError):
+	sys.exit(1);
 
 
 
@@ -121,8 +126,8 @@ class Vulnerability:
 	def __init__(self, cve, products, datePublished, datePatched, cvss, cwe, references, summary):
 		self.cve 			= cve;				#CVE identifier for this vulnerability
 		self.products 		= products;			#a list containing the names of all products affected
-		self.datePublished 	= datePublished;	#the date this vulnerability was published (YYYY-MM-DD)
-		self.datePatched 	= datePatched;		#the date this vulnerability was patched (YYYY-MM-DD)
+		self.datePublished 	= datePublished;	#the date this vulnerability was published
+		self.datePatched 	= datePatched;		#the date this vulnerability was patched
 		self.cvss 			= cvss;				#a CVSS object representing this vulnerability's CVSS information
 		self.cwe 			= cwe;				#A CWE identifier for this vulnerability
 		self.references		= references;		# a list of the references (strings)
@@ -161,7 +166,7 @@ class Vulnerability:
 			print();
 			self.cvss.printCVSS();
 
-		print("references: ", end="");
+		print("References: ", end="");
 		if (self.references == None):
 			print("None");
 		else:
@@ -376,16 +381,18 @@ def parse(layers):
 
 	vulnerabilityXMLRoot = None;
 
+	#Initial setup of our dictionary
 	vulnerabilityList = {};
 	for layer in layers:
 		vulnerabilityList[layer] = [];
 	
+	#Begin looping through each XML file
 	global fileNames;
 	for filename in tqdm(fileNames):
 		#Attempt to parse the given file, catch the error if that file is not found
 		try:
 			tree = etree.parse(filename);
-		except FileNotFoundError:
+		except:
 			print("Unable to open file " + filename);
 			continue;
 			
@@ -491,8 +498,7 @@ def parse(layers):
 				vulnerabilityList[affectedLayer].append(vulnerability);
 				vulnerabilityXMLRoot.append(entry);
 
-	#Need to duplicate one of the roots, then add relevant vulnerability entries to that new tree
-	#-Can't remove bad ones from root b/c root isn't in this scope
+	#Print the XML tree to a file for later use and analysis
 	file = "TESTINGOUTPUT.txt";
 	sys.stdout = open(file, 'w');
 	print(prettify(vulnerabilityXMLRoot));
@@ -530,6 +536,7 @@ def getCVSS(entry):
 #@param entry: the XML object to parse
 #returns a list of strings that are the references for this entry's vulnerability
 def getReferences(entry):
+
 	referenceList = [];
 	for reference in entry.findall('.//vuln:references/vuln:reference', namespace):
 		referenceURL = reference.attrib['href'];
@@ -593,7 +600,7 @@ def filterVulnerabilitiesBySummary(vulnerabilities, filter):
 def createTimeline(vulnerabilities, layers):
 
 	#Initialization of subplots, 1 per layer
-	fig, ax = plt.subplots(len(layers) + 1, sharex=True);
+	fig, ax = plt.subplots(len(layers) + 2, sharex=True, figsize=(14,9));
 	
 	#Default start and end dates for the x axis
 	startDate = pd.to_datetime("December 31, 2016");
@@ -607,7 +614,7 @@ def createTimeline(vulnerabilities, layers):
 	for layer in layers:
 		layerVulnerabilities = vulnerabilities[layer];
 
-		ax[-1].hlines(len(layers) - (subplot), pd.to_datetime("January 1, 1999"), pd.to_datetime("December 31, 2016"), linewidth=3);
+		ax[-2].hlines(len(layers) - (subplot), pd.to_datetime("January 1, 1999"), pd.to_datetime("December 31, 2016"), linewidth=3);
 
 		#Format this subplot to look correct
 		ax[subplot].spines['right'].set_visible(False)
@@ -630,13 +637,12 @@ def createTimeline(vulnerabilities, layers):
 		sys.stdout = open(filename, 'w');
 		for vulnerability in layerVulnerabilities:
 			vulnerability.printVuln();
-			#print(vulnerability.cve);
 
 			date = pd.to_datetime(vulnerability.datePublished);
 			date2 = date + pd.Timedelta(vulnerability.datePatched, unit='d')
 			
 			ax[subplot].hlines(count, date, date2);
-			ax[-1].hlines(len(layers) - (subplot), date, date2, color='r', linewidth=3);
+			ax[-2].hlines(len(layers) - (subplot), date, date2, color='r', linewidth=3);
 
 			#Set our new start/end for the x axis if neccessary
 			if (date < startDate):
@@ -649,15 +655,32 @@ def createTimeline(vulnerabilities, layers):
 
 		ax[subplot].set_ylim([0, count]);
 		subplot += 1;
-	
 
+	#Get the gaps for this layered system
+	gaps = findSecurityGaps(vulnerabilities, layers);
+	gaps = mergeSecurityGaps(gaps, layers);
+
+	#Plot the overall, systemwide gaps
+	for gap in gaps:
+		ax[-1].hlines((len(layers) + 1)/2, gap[0], gap[1], color='r', linewidth=3);
+	
+	#Format the plot so it looks like a timeline
+	ax[-2].spines['right'].set_visible(False)
+	ax[-2].spines['left'].set_visible(False)
+	ax[-2].spines['top'].set_visible(False)
+	ax[-2].xaxis.set_ticks_position('bottom')
+	ax[-2].get_yaxis().set_ticklabels([])
+	ax[-2].set_ylim([0, subplot + 1]);
+	ax[-2].set_ylabel("Gaps In Layers");
+
+	#Format the plot so it looks like a timeline
 	ax[-1].spines['right'].set_visible(False)
 	ax[-1].spines['left'].set_visible(False)
 	ax[-1].spines['top'].set_visible(False)
 	ax[-1].xaxis.set_ticks_position('bottom')
 	ax[-1].get_yaxis().set_ticklabels([])
 	ax[-1].set_ylim([0, subplot + 1]);
-	ax[-1].set_ylabel("Gaps In Layers");
+	ax[-1].set_ylabel("Total Security");
 
 	fig.autofmt_xdate();
 
@@ -709,10 +732,12 @@ def createTimelinePoints(vulnerabilities, layers):
 			yCount.append(count);
 			count += 1;
 
+		#Plot the points on the graph and label them appropriately
 		label = ax.scatter(layerVulns, yCount, marker='s', color=colors[colorPointer]);
 		labels.append(label);
 		handles.append(layer.replace(':', ' ').title());
 
+		#Assign a color to this layer's points
 		colorPointer += 1;
 		if (colorPointer > 6):
 			colorpointer = 0;
@@ -755,6 +780,12 @@ def findSecurityGaps(vulnerabilities, layers):
 		layerGaps = [];
 		layerVulnerabilities = vulnerabilities[layer];
 
+		#Basic validity checking
+		if (layerVulnerabilities == [] or layerVulnerabilities == None):
+			gaps[layer] = [];
+			continue;
+
+		#Start this process for the first gap
 		vulnStart = pd.to_datetime(layerVulnerabilities[0].datePublished);
 		vulnEnd = vulnStart + pd.Timedelta(layerVulnerabilities[0].datePatched, unit='d');
 		layerGaps.append([vulnStart, vulnEnd]);
@@ -799,6 +830,113 @@ def findSecurityGaps(vulnerabilities, layers):
 		gaps[layer] = layerGaps;
 
 	return gaps;
+
+
+
+#Merges gaps across multiple layers
+#@param gaps: a dictionary where they key is the layer name and the value is a 2d list
+#-this 2d list is simply a list where each index holds 2 values, the start of the security gap and the end of the security gap
+#@param layers: a list of the layers being looked at
+#returns a list where each index holds 2 values, the start of the security gap and the end of the security gap
+def mergeSecurityGaps(gaps, layers):
+	if (len(layers) == 1):
+		return gaps[layers[0]];
+
+	finalGaps = [];						#What we return
+	numLayers = len(layers);			#The number of layers in this run
+
+	layerIterator = 1;
+	gapListOne = copy.deepcopy(gaps[layers[0]]);	#The actual gaps in the first layer
+	numGapsOne = len(gapListOne);					#The number of gaps in the first layer
+
+	while(layerIterator < len(layers)):
+		layer = layers[layerIterator]
+		gapListN = gaps[layer];
+		numGapsN = len(gapListN);
+
+		#Can't get better than zero vulnerabilities!
+		if (gapListN == [] or gapListN == None):
+			return [];
+
+		gapIteratorOne	= 0;
+		gapIteratorN 	= 0;
+		while (gapIteratorOne < numGapsOne):
+			gapOne = gapListOne[gapIteratorOne];
+			while(gapIteratorN < numGapsN):
+				gapN = gapListN[gapIteratorN];
+				if   (gapN[0] > gapOne[0] and gapN[0] < gapOne[1] and gapN[1] > gapOne[1]):
+					#One: |-----------|
+					#N  :       |----------|
+					#One start becomes N start
+					thisGap = [gapN[0], gapOne[1]];
+					finalGaps.append(thisGap);
+
+				elif (gapN[0] < gapOne[0] and gapN[1] > gapOne[0] and gapN[1] < gapOne[1]):
+					#One:       |----------|
+					#N: |-----------|
+					#One end becomes N end
+					thisGap = [gapOne[0], gapN[1]];
+					finalGaps.append(thisGap);
+
+				elif (gapN[0] < gapOne[0] and gapN[1] > gapOne[1]):
+					#One:     |----|
+					#N  : |--------------|
+					#One stays the same, continue;
+					thisGap = copy.copy(gapOne);
+					finalGaps.append(thisGap);
+
+				elif (gapOne[0] < gapN[0] and gapOne[1] > gapN[1]):
+					#One: |--------------|
+					#N  :     |----|
+					#One becomes N.
+					thisGap = copy.copy(gapN);
+					finalGaps.append(thisGap);
+
+				gapIteratorN += 1;
+
+			gapIteratorN 	= 0;
+			gapIteratorOne += 1;
+
+		if (layerIterator == 1):
+			gapListOne = finalGaps;
+		gapIteratorOne = 0;
+		layerIterator += 1;
+
+	return finalGaps;
+
+
+
+def howMuchMoreSecure(vulnerabilities, layers):
+	#Get the gaps for this layered system
+	layerGaps = findSecurityGaps(vulnerabilities, layers);
+	gaps = mergeSecurityGaps(layerGaps, layers);
+
+	totalLayerVulnerability = 0;
+	totalSystemVulnerability = 0;
+
+	print("Total Layer Vulnerability: ")
+	for layer in layers:
+		gapList = layerGaps[layer];
+		for gap in gapList:
+			start = pd.to_datetime(gap[0]);
+			end = pd.to_datetime(gap[1]);
+			days = end - start;
+			totalLayerVulnerability += int(days / pd.Timedelta(1, 'D'));
+
+	print();
+	print("Total System Vulnerability");
+	for gap in gaps:
+		start = pd.to_datetime(gap[0]);
+		end = pd.to_datetime(gap[1]);
+		days = end - start;
+		totalSystemVulnerability += int(days / pd.Timedelta(1, 'D'));
+
+	percentIncrease = 100*(1 - totalSystemVulnerability/totalLayerVulnerability);
+
+	print("Layer  Vulnerability: " + str(totalLayerVulnerability)  + " days");
+	print("System Vulnerability: " + str(totalSystemVulnerability) + " days");
+	print("Increase in Security: " + "{0:.2f}".format(percentIncrease) + "% increase;");
+	print();
 
 
 
@@ -879,7 +1017,7 @@ def main(argv):
 	print();
 
 	#The default values for the "filter" variables
-	global minCVSS, patchTime, fileNames, outputFile, layers;
+	global minCVSS, patchTime, fileNames, outputFile, layers, totalVulnerabilities;
 	minScore 			= 0;
 	minAccess 			= 0;
 	minComplexity 		= 0;
@@ -958,6 +1096,7 @@ def main(argv):
 			outputFile = outputFile.rstrip(' ');
 			outputFile = arg;
 
+	#Create a CVSS object of the minimum cvss values for vulnerability filtering
 	minCVSS = CVSS(minScore, minAccess, minComplexity, minAuthentication, minConfidentiality, minIntegrity, minAvailability);
 
 	#Ensure we have a set of layers to analyze
@@ -965,15 +1104,25 @@ def main(argv):
 		print("Please specify one or more layers to analyze.");
 		sys.exit(1);
 
-	#The bulk of this program, the actual gathering of data happens here, and in the parse method
+	#The bulk of this program, the actual gathering of data happens here, in the parse method
 	print();
 	print("Analyzing NVD XML Files");
 	vulnerabilityList = parse(layers);
+	print();
 
 	print("Total Vulnerabilities: " + str(totalVulnerabilities));
 
+	if (totalVulnerabilities == 0):
+		print("No Vulnerabilities for the specified layer(s)");
+		print();
+		sys.exit(1);
+
+	howMuchMoreSecure(vulnerabilityList, layers);
+	
 	createTimeline(vulnerabilityList, layers);
-	#createTimelinePoints(vulnerabilityList, layers);
+
+	print();
+
 
 
 #Ensures this only runs if parse.py is the main file called
