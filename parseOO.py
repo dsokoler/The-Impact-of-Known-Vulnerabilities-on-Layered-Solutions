@@ -1,5 +1,3 @@
-#TQDM is the progress bar
-from tqdm import tqdm
 import sys, getopt, random, copy
 import xml.dom.minidom as minidom;
 
@@ -12,29 +10,35 @@ importError = False;
 try:
 	import numpy;
 except ImportError:
-	print("Please install NumPy: \"pip install numpy\"");
+	print("Please install NumPy");
+	importError = True;
+
+try:
+	from scipy.stats import gamma
+except ImportError:
+	print("Please install SciPy");
 	importError = True;
 
 #Pandas is for datetimes
 try:
 	import pandas as pd
 except ImportError:
-	print("Please install Pandas: \"pip install pandas\"");
+	print("Please install Pandas");
 	importError = True;
 
 #MatPlotLib is for the visualization
 try:
 	import matplotlib.pyplot as plt;
 except ImportError:
-	print("Please install MatPlotLib: \"pip install matplotlib\"");
+	print("Please install MatPlotLib");
 	importError = True;
 
-#lxml is a more advanced xml processor
+#Element Tree parses xml
 try:
 	import xml.etree.ElementTree as etree
 except ImportError:
 	print("Error importing ElementTree, please check your python installation");
-	sys.exit(1);
+	importError = True;
 print();
 
 if (importError):
@@ -43,9 +47,12 @@ if (importError):
 
 
 #The default values for the "filter" variables
-minCVSS 			= None;
-patchTime 			= 7;
-outputFile			= "";
+minCVSS 	= None;
+patchTime 	= 7;
+outputFile	= "";
+
+startDate	= None;
+endDate		= None;
 
 totalVulnerabilities = 0;
 
@@ -375,9 +382,11 @@ def prettify(elem):
 
 #Basic parsing of the xml file
 #@param 'layers': a list of the layers to be parsed for
+#@param 'layerAlternatives': a dictionary holding lists of alternative names for each layer
+#@param 'keywords': a list of strings to check vulnerability summaries for
 #returns a dictionary of lists of vulnerability objects, one list per layer
-def parse(layers):
-	global minCVSS, patchTime, outputFile;
+def parse(layers, layerAlternatives, keywords):
+	global minCVSS, patchTime, outputFile, startDate, endDate;
 
 	vulnerabilityXMLRoot = None;
 
@@ -388,7 +397,7 @@ def parse(layers):
 	
 	#Begin looping through each XML file
 	global fileNames;
-	for filename in tqdm(fileNames):
+	for filename in (fileNames):
 		#Attempt to parse the given file, catch the error if that file is not found
 		try:
 			tree = etree.parse(filename);
@@ -436,6 +445,16 @@ def parse(layers):
 			if (cveSummary != None):
 				cveSummary = cveSummary.text;
 
+				#Make sure this vulnerability has at least one keyword
+				if (keywords != None and keywords != []):
+					hasKeyword = False;
+					for word in keywords:
+						if (word in cveSummary):
+							hasKeyword = True;
+					if (not hasKeyword):
+						root.remove(entry);
+						continue;
+
 			#'** REJECT **' indicates this vulnerability entry is invalid and should be ignored
 			if (cveSummary != None and "** REJECT **" in cveSummary):
 				root.remove(entry);
@@ -456,6 +475,12 @@ def parse(layers):
 				for layer in layers:
 					if (layer in product and layer not in affectedLayers):
 						affectedLayers.append(layer);
+					elif (layer not in product and layer not in affectedLayers):
+						altNames = layerAlternatives[layer];
+						for name in altNames:
+							if (name in product):
+								affectedLayers.append(layer);
+								break;
 			if (affectedLayers == []):
 				root.remove(entry);
 				continue;
@@ -465,14 +490,26 @@ def parse(layers):
 
 			#Validate the date this vulnerability was published
 			if (datePublished == None):
+				root.remove(entry);
 				continue;
 			else:
 				datePublishedText 	= datePublished.text;
 				datePublished 		= datePublishedText.split('T', 1)[0];
 
-			#Generate a random patch date for this vulnerability (will be changed when wehave actual patch dates)
+				#If a start/end date was specified check this vulnerability against that
+				pdDate = pd.to_datetime(datePublished);
+				if (startDate != None):
+					if (pdDate < startDate):
+						root.remove(entry);
+						continue;
+				if (endDate != None):
+					if (pdDate > endDate):
+						root.remove(entry);
+						continue;
+
+			#Generate a statisically accurate random patch date for this vulnerability
 			global patchTime;
-			datePatched = generateRandomPatchTime(patchTime, 2, 150);
+			datePatched = generateStatisticalPatchTime() + patchTime;
 
 			#Holds all the information regarding this vulnerability's CVSS score
 			cvssObject = getCVSS(entry);
@@ -500,6 +537,8 @@ def parse(layers):
 
 	#Print the XML tree to a file for later use and analysis
 	file = "TESTINGOUTPUT.txt";
+	if (outputFile != None):
+		file = outputFile;
 	sys.stdout = open(file, 'w');
 	print(prettify(vulnerabilityXMLRoot));
 	sys.stdout = sys.__stdout__;
@@ -614,7 +653,7 @@ def createTimeline(vulnerabilities, layers):
 	for layer in layers:
 		layerVulnerabilities = vulnerabilities[layer];
 
-		ax[-2].hlines(len(layers) - (subplot), pd.to_datetime("January 1, 1999"), pd.to_datetime("December 31, 2016"), linewidth=3);
+		#ax[-2].hlines(len(layers) - (subplot), pd.to_datetime("January 1, 1999"), pd.to_datetime("December 31, 2016"), linewidth=3);
 
 		#Format this subplot to look correct
 		ax[subplot].spines['right'].set_visible(False)
@@ -642,7 +681,7 @@ def createTimeline(vulnerabilities, layers):
 			date2 = date + pd.Timedelta(vulnerability.datePatched, unit='d')
 			
 			ax[subplot].hlines(count, date, date2);
-			ax[-2].hlines(len(layers) - (subplot), date, date2, color='r', linewidth=3);
+			ax[-2].hlines(len(layers) - (subplot), date, date2, linewidth=5);
 
 			#Set our new start/end for the x axis if neccessary
 			if (date < startDate):
@@ -662,7 +701,7 @@ def createTimeline(vulnerabilities, layers):
 
 	#Plot the overall, systemwide gaps
 	for gap in gaps:
-		ax[-1].hlines((len(layers) + 1)/2, gap[0], gap[1], color='r', linewidth=3);
+		ax[-1].hlines((len(layers) + 1)/2, gap[0], gap[1], linewidth=5);
 	
 	#Format the plot so it looks like a timeline
 	ax[-2].spines['right'].set_visible(False)
@@ -849,6 +888,7 @@ def mergeSecurityGaps(gaps, layers):
 	gapListOne = copy.deepcopy(gaps[layers[0]]);	#The actual gaps in the first layer
 	numGapsOne = len(gapListOne);					#The number of gaps in the first layer
 
+	#We iterate through each layer to compare to other layers
 	while(layerIterator < len(layers)):
 		layer = layers[layerIterator]
 		gapListN = gaps[layer];
@@ -906,10 +946,14 @@ def mergeSecurityGaps(gaps, layers):
 
 
 
+#Prints basic statistics on increase in security
+#@param 'vulnerabilities': a dictionary of lists holding vulnerability objects per each layer
+#@param 'layers': a list of layers in this layered solution
+#returns nothing, simply prints information
 def howMuchMoreSecure(vulnerabilities, layers):
 	#Get the gaps for this layered system
-	layerGaps = findSecurityGaps(vulnerabilities, layers);
-	gaps = mergeSecurityGaps(layerGaps, layers);
+	layerGaps 	= findSecurityGaps(vulnerabilities, layers);
+	gaps 		= mergeSecurityGaps(layerGaps, layers);
 
 	totalLayerVulnerability = 0;
 	totalSystemVulnerability = 0;
@@ -918,17 +962,17 @@ def howMuchMoreSecure(vulnerabilities, layers):
 	for layer in layers:
 		gapList = layerGaps[layer];
 		for gap in gapList:
-			start = pd.to_datetime(gap[0]);
-			end = pd.to_datetime(gap[1]);
-			days = end - start;
+			start 	= pd.to_datetime(gap[0]);
+			end 	= pd.to_datetime(gap[1]);
+			days 	= end - start;
 			totalLayerVulnerability += int(days / pd.Timedelta(1, 'D'));
 
 	print();
 	print("Total System Vulnerability");
 	for gap in gaps:
-		start = pd.to_datetime(gap[0]);
-		end = pd.to_datetime(gap[1]);
-		days = end - start;
+		start 	= pd.to_datetime(gap[0]);
+		end 	= pd.to_datetime(gap[1]);
+		days 	= end - start;
 		totalSystemVulnerability += int(days / pd.Timedelta(1, 'D'));
 
 	percentIncrease = 100*(1 - totalSystemVulnerability/totalLayerVulnerability);
@@ -965,6 +1009,87 @@ def generateRandomPatchTime(patchTime, start, end):
 
 
 
+#A random number generator for the gamma function based on alpha and theta
+#returns an integer generated randomly through the gamma function defined by the alpha and theta shown below
+def generateStatisticalPatchTime():
+	#Optimized shape and scale parameters
+	alpha = 0.875424;
+	theta = 15.592681;
+
+	patch_ar 		= int(gamma.rvs(alpha, 0, theta, 1));
+	#patch_offset 	= patch_ar[0];
+	return patch_ar;
+
+
+
+#Generate the patch dates for all relevant vulnerabilities and log them
+#layer_1_days_vuln:layer_1_num_windows:layer_1_long_window:layer_2_days_vuln:layer_2_num_windows:layer_2_long_window:solution_days_vuln:solution_num_windows:solution_long_window
+#-each layer total days vulnerable
+#-each layer number of windows
+#-each layer longest window
+#-above 3 stats for total system
+#Run this many times (~100) and print it each time to text file in the above format
+def generateStatistics(vulnerabilities, layers, runs):
+	#Don't mess with the original dataset
+	vPatch = copy.deepcopy(vulnerabilities);
+	
+	#Our output file
+	file = "statistics.txt";
+	sys.stdout = open(file, 'w');
+	for i in range(0, runs):
+
+		#for layer in layers: 
+		#	vulnList = vPatch[layer];
+
+		#	for vulnerability in vulnList:
+		#		patchDate = generateStatisticalPatchTime() + 7;		#We assume 7 days to actually implement the patch
+		#		vulnerability.datePatched = patchDate;
+		#		#vulnerability.datePatched = pd.to_datetime(vulnerability.datePublished) + pd.Timedelta(patchDate, unit='d');
+
+		#Get the gaps for this layered system
+		layerGaps 	= findSecurityGaps(vPatch, layers);
+		gaps 		= mergeSecurityGaps(layerGaps, layers);
+
+		#Loop through each layer to insert our statistical data
+		for layer in layers:
+			gapList 		= layerGaps[layer];
+			layerDaysVuln 	= 0;
+			layerNumWindows = len(gapList);
+			layerMaxWindow 	= 0;
+
+			#Loop through each gap in this layer to insert our statistical data
+			for gap in gapList:
+				start 	= pd.to_datetime(gap[0]);
+				end 	= pd.to_datetime(gap[1]);
+				window 	= int( (end - start) / pd.Timedelta(1, 'D'))
+				layerDaysVuln += window;
+
+				if (window > layerMaxWindow):
+					layerMaxWindow = window;
+
+			print(str(layerDaysVuln) + ":" + str(layerNumWindows) + ":" + str(layerMaxWindow) + ":", end="");
+
+
+		sysDaysVuln 	= 0;
+		sysNumWindows 	= len(gaps);
+		sysMaxWindow 	= 0;
+
+		for gap in gaps:
+			start 	= pd.to_datetime(gap[0]);
+			end 	= pd.to_datetime(gap[1]);
+			window 	= int( (end - start) / pd.Timedelta(1, 'D'));
+			sysDaysVuln += window;
+
+			if (window > sysMaxWindow):
+				sysMaxWindow = window;
+
+		print(str(sysDaysVuln) + ":" + str(sysNumWindows) + ":" + str(sysMaxWindow));
+	
+	sys.stdout = sys.__stdout__;
+
+
+
+
 #Downloads and unzips the NVD files
 #Returns nothing.  If files are successfully downloaded and unzipped
 # the fileNames global is replaced with those that were downloaded.
@@ -972,7 +1097,7 @@ def downloadNVDFiles():
 	files = [];
 
 	print("Downloading NVD XML Files")
-	for url in tqdm(fileURLs):
+	for url in (fileURLs):
 		r = requests.get(url, stream=True);
 
 		if (not r.ok):
@@ -992,24 +1117,31 @@ def downloadNVDFiles():
 
 #Main method	
 #-h: 			print the help string
-#--score=?		lowest score that makes a vulnerability relevant
-#--av=?: 		lowest level of access vector that makes a vulnerability relevant			
-#--ac=?: 		lowest level of access complexity that makes a vulnerability relevant	
-#--auth=?: 		lowest level of authentication that makes a vulnerability relevant		
-#--conf=?: 		lowest level of confidentiality impact that makes a vulnerability relevant
-#--int=?: 		lowest level of integrity impact that makes a vulnerability relevant	
-#--avail=?: 	lowest level of availability impact that makes a vulnerability relevant	
+#--score=?		lowest score that makes a vulnerability relevant (Argument should be between 0 and 10, inclusive)
+#--av=?: 		lowest level of access vector that makes a vulnerability relevant (Argument should be a 0, 1, or 2)		
+#--ac=?: 		lowest level of access complexity that makes a vulnerability relevant (Argument should be a 0, 1, or 2)
+#--auth=?: 		lowest level of authentication that makes a vulnerability relevant (Argument should be a 0, 1, or 2)
+#--conf=?: 		lowest level of confidentiality impact that makes a vulnerability relevant (Argument should be a 0, 1, or 2)
+#--int=?: 		lowest level of integrity impact that makes a vulnerability relevant (Argument should be a 0, 1, or 2)
+#--avail=?: 	lowest level of availability impact that makes a vulnerability relevant (Argument should be a 0, 1, or 2)
 #--layers=?:	a comma separated list of the layers we are interested in looking at
 #--patchtime=?: the average time it takes from when a patch is released to when it is applied
+#--input=?:		a comma separated list of the files to use as input (must be xml with nvd schema)
+#--output=?:	a single filename that specifies the name of the file the filetered xml should be printed to
+#--layerXAlt=?:	a list of alternative names for layer X ("n1,n2,n3,...").
+#				***MUST COME AFTER --layers***
+#--keywords=?:	a list of keywords to search each vulnerability summary for ("k1,k2,k3,...")
+#--startDate=?:	the beginning of the time period from which we collect vulnerabilities (YYYY-MM-DD)
+#--endDate=?:	the end of the time period from which we collect vulnerabilities (YYYY-MM-DD)
 #--download:	download the latest NVD files from their website
-#--input:		a comma separated list of the files to use as input (must be xml with nvd schema)
-#--output:		a single filename that specifies the name of the file the filetered xml should be printed to
-#Options that begin with "--" should have their argument be a number, either 0 1 or 2
 optionsList = "h";
 longOptionsList = ["score=", "av=", "ac=", "auth=", 
 				   "conf=", "int=", "avail=", "layers=", 
 				   "patchtime=", "download", "output=", 
-				   "input="];
+				   "input=", "layer1Alt=", "layer2Alt=", 
+				   "layer3Alt=", "layer4Alt=", "layer5Alt=", 
+				   "layer6Alt=", "layer7Alt=", "layer8Alt=", 
+				   "keywords=", "startDate=", "endDate="];
 def main(argv):
 
 	print();
@@ -1017,7 +1149,7 @@ def main(argv):
 	print();
 
 	#The default values for the "filter" variables
-	global minCVSS, patchTime, fileNames, outputFile, layers, totalVulnerabilities;
+	global minCVSS, patchTime, fileNames, outputFile, layers, totalVulnerabilities, startDate, endDate;
 	minScore 			= 0;
 	minAccess 			= 0;
 	minComplexity 		= 0;
@@ -1028,6 +1160,15 @@ def main(argv):
 	patchTime 			= 7;
 	outputFile			= None;
 
+	#A list containing the name of each layer in this system
+	layers = [];
+
+	#A list of keywords used to search vulnerability summaries
+	keywords = [];
+
+	#A dictionary holding all alternative names for each layer, indexed by layer name
+	layerAlternatives = {};
+	layerAlternativeTracker = [False, False, False, False, False, False, False, False];
 
 	#Get the options and their arguments from the command line
 	try:
@@ -1039,7 +1180,7 @@ def main(argv):
 	#Take the appropriate action with those arguments and validate them
 	hasLayer = False;
 	for opt, arg in opts:
-		print("Option: " + opt + "\t\tArgument: " + arg);
+		print("Option: " + opt + "\t\tArgument: \"" + arg + "\"");
 		if(opt == "-h"):
 			print(helpText);
 			sys.exit(2);
@@ -1095,6 +1236,24 @@ def main(argv):
 			outputFile = arg.lstrip(' ');
 			outputFile = outputFile.rstrip(' ');
 			outputFile = arg;
+		elif (opt == "--layer1Alt" or opt == "--layer2Alt" or opt == "--layer3Alt" or opt == "--layer4Alt" or
+			  opt == "--layer5Alt" or opt == "--layer6Alt" or opt == "--layer7Alt" or opt == "--layer8Alt"):
+			layerNumber = int(opt[7]) - 1;
+			layerName = layers[layerNumber];
+			layerAlternatives[layerName] = arg.replace(' ', ':').lower().split(',');
+			layerAlternativeTracker[layerNumber] = True;
+		elif (opt == "--keywords"):
+			keywords = arg.split(',');
+		elif (opt == "--startDate"):
+			startDate = pd.to_datetime(arg);
+		elif (opt == "--endDate"):
+			endDate = pd.to_datetime(arg);
+
+
+	#Ensure our alternative layer will not cause errors down the line
+	for i in range(0, len(layers)):
+		if (not layerAlternativeTracker[i]):
+			layerAlternatives[layers[i]] = [];
 
 	#Create a CVSS object of the minimum cvss values for vulnerability filtering
 	minCVSS = CVSS(minScore, minAccess, minComplexity, minAuthentication, minConfidentiality, minIntegrity, minAvailability);
@@ -1107,17 +1266,20 @@ def main(argv):
 	#The bulk of this program, the actual gathering of data happens here, in the parse method
 	print();
 	print("Analyzing NVD XML Files");
-	vulnerabilityList = parse(layers);
+	vulnerabilityList = parse(layers, layerAlternatives, keywords);
 	print();
 
 	print("Total Vulnerabilities: " + str(totalVulnerabilities));
 
+	#If there are no vulnerabilities for any layer we do not need to proceed past here
 	if (totalVulnerabilities == 0):
 		print("No Vulnerabilities for the specified layer(s)");
 		print();
 		sys.exit(1);
 
-	howMuchMoreSecure(vulnerabilityList, layers);
+	generateStatistics(vulnerabilityList, layers, 50);
+
+	#howMuchMoreSecure(vulnerabilityList, layers);
 	
 	createTimeline(vulnerabilityList, layers);
 
