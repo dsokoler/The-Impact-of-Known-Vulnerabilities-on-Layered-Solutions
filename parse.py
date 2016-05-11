@@ -1,3 +1,5 @@
+#This python script is best used with Anaconda
+
 import sys, getopt, random, copy
 import xml.dom.minidom as minidom;
 
@@ -77,6 +79,7 @@ fileNames = ['nvdcve-2.0-2002.xml', 'nvdcve-2.0-2003.xml', 'nvdcve-2.0-2004.xml'
 
 
 
+#Location of NVD files, used when downloading
 fileURLs = ['https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2002.xml.zip',
 			'https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2003.xml.zip',
 			'https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2004.xml.zip',
@@ -95,7 +98,7 @@ fileURLs = ['https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2002.xml.zip',
 
 
 
-#Include CVSS description and levels here
+#The text that is printed when the "-h" option is specified
 helpText 	= """
 --av: Access Vector
 --ac: Access Complexity
@@ -103,6 +106,16 @@ helpText 	= """
 --conf: the impact on the system's confidentiality
 --int: the impact on the system's integrity
 --avail: the impact on the system's availability
+--layers=?:	a comma separated list of the layers we are interested in looking at
+--patchtime=?: the average time it takes from when a patch is released to when it is applied
+--input=?:		a comma separated list of the files to use as input (must be xml with nvd schema)
+--output=?:	a single filename that specifies the name of the file the filetered xml should be printed to
+--layerXAlt=?:	a list of alternative names for layer X ("n1,n2,n3,...").
+\t***MUST COME AFTER --layers***
+--keywords=?:	a list of keywords to search each vulnerability summary for ("k1,k2,k3,...")
+--startDate=?:	the beginning of the time period from which we collect vulnerabilities (YYYY-MM-DD)
+--endDate=?:	the end of the time period from which we collect vulnerabilities (YYYY-MM-DD)
+--download:	download the latest NVD files from their website
 
 	0				1				2
 --av	LOCAL				ADJACENT_NETWORK	\tNETWORK
@@ -120,7 +133,7 @@ helpText 	= """
 
 #Specifies information about the creation of this project
 aboutText 	= """Produced as part of the INSuRE Project at Purdue University, Spring 2016 by Daniel Sokoler and Robert Haverkos
-Professors: Dr. Melissa Dark, Dr. John Springer, Dr. Filipo Sharevski
+Professors: Dr. Melissa Dark, Dr. John Springer
 Technical Director: Trent Pitsenbarger (NSA)""";
 
 
@@ -538,7 +551,7 @@ def parse(layers, layerAlternatives, keywords):
 				vulnerabilityXMLRoot.append(entry);
 
 	#Print the XML tree to a file for later use and analysis
-	file = "output.txt";
+	file = "output.xml";
 	if (outputFile != None):
 		file = outputFile;
 	sys.stdout = open(file, 'w');
